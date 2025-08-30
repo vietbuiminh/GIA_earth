@@ -1,5 +1,7 @@
 earth
 =====
+Modification notes from Viet
+- No need wind, wave so I comment out the animate, animatorAgent, and fieldAgen in the `earth.js`
 
 **NOTE: the location of `dev-server.js` has changed from `{repository}/server/` to `{repository}/`**
 

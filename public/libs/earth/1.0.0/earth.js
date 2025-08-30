@@ -79,8 +79,8 @@
     var globeAgent = newAgent();     // the model of the globe
     var gridAgent = newAgent();      // the grid of weather data
     var rendererAgent = newAgent();  // the globe SVG renderer
-    var fieldAgent = newAgent();     // the interpolated wind vector field
-    var animatorAgent = newAgent();  // the wind animator
+    // var fieldAgent = newAgent();     // the interpolated wind vector field
+    // var animatorAgent = newAgent();  // the wind animator
     var overlayAgent = newAgent();   // color overlay over the animation
 
     /**
@@ -293,21 +293,161 @@
         // First clear map and foreground svg contents.
         µ.removeChildren(d3.select("#map").node());
         µ.removeChildren(d3.select("#foreground").node());
+
+        // Viet added the custom relief layer because wind and other was removed
+        var reliefHi = { img: null, data: null, loaded: false };
+        var reliefLo = { img: null, data: null, loaded: false };
+        var useReliefLo = false;
+        // For fast rendering: offscreen canvas for low-res relief
+        var reliefFastScale = 0.25; // 0.25 = 1/4 res, adjust for quality/speed
+        var reliefFastCanvas = document.createElement("canvas");
+        reliefFastCanvas.width = Math.round(view.width * reliefFastScale);
+        reliefFastCanvas.height = Math.round(view.height * reliefFastScale);
+
         // Create new map svg elements.
         globe.defineMap(d3.select("#map"), d3.select("#foreground"));
+        
+        // Relief canvas overlay
+        var reliefCanvas = document.getElementById("relief-canvas");
+        if (!reliefCanvas) {
+            reliefCanvas = document.createElement("canvas");
+            reliefCanvas.id = "relief-canvas";
+            reliefCanvas.width = view.width;
+            reliefCanvas.height = view.height;
+            reliefCanvas.style.position = "absolute";
+            reliefCanvas.style.left = "0";
+            reliefCanvas.style.top = "0";
+            reliefCanvas.style.pointerEvents = "none";
+            reliefCanvas.style.zIndex = 1;
+            var display = document.getElementById("display");
+            if (display) {
+                display.insertBefore(reliefCanvas, display.firstChild);
+            } else {
+                document.body.appendChild(reliefCanvas);
+            }
+        } else {
+            reliefCanvas.width = view.width;
+            reliefCanvas.height = view.height;
+        }
 
+        function loadReliefImages(callback) {
+            var loadedCount = 0;
+            function checkDone() {
+                loadedCount++;
+                if (loadedCount === 2 && callback) callback();
+            }
+            // Hi-res
+            if (!reliefHi.loaded) {
+                reliefHi.img = new window.Image();
+                reliefHi.img.onload = function() {
+                    var tmp = document.createElement("canvas");
+                    tmp.width = reliefHi.img.width;
+                    tmp.height = reliefHi.img.height;
+                    var tmpCtx = tmp.getContext("2d");
+                    tmpCtx.drawImage(reliefHi.img, 0, 0);
+                    reliefHi.data = tmpCtx.getImageData(0, 0, reliefHi.img.width, reliefHi.img.height).data;
+                    reliefHi.loaded = true;
+                    checkDone();
+                };
+                reliefHi.img.src = "relief.jpg";
+            } else {
+                checkDone();
+            }
+            // Lo-res
+            if (!reliefLo.loaded) {
+                reliefLo.img = new window.Image();
+                reliefLo.img.onload = function() {
+                    var tmp = document.createElement("canvas");
+                    tmp.width = reliefLo.img.width;
+                    tmp.height = reliefLo.img.height;
+                    var tmpCtx = tmp.getContext("2d");
+                    tmpCtx.drawImage(reliefLo.img, 0, 0);
+                    reliefLo.data = tmpCtx.getImageData(0, 0, reliefLo.img.width, reliefLo.img.height).data;
+                    reliefLo.loaded = true;
+                    checkDone();
+                };
+                reliefLo.img.src = "relief-low.jpg";
+            } else {
+                checkDone();
+            }
+        }
+
+        function drawRelief() {
+            var relief = useReliefLo ? reliefLo : reliefHi;
+            if (!relief.loaded || !relief.data) return;
+            var ctx = reliefCanvas.getContext("2d");
+            ctx.clearRect(0, 0, view.width, view.height);
+            if (useReliefLo) {
+                // Fast mode: draw to small offscreen canvas, then upscale
+                var fastW = reliefFastCanvas.width;
+                var fastH = reliefFastCanvas.height;
+                var fastCtx = reliefFastCanvas.getContext("2d");
+                var outImg = fastCtx.createImageData(fastW, fastH);
+                var projection = globe.projection;
+                for (var y = 0; y < fastH; y++) {
+                    for (var x = 0; x < fastW; x++) {
+                        var sx = x / fastW * view.width;
+                        var sy = y / fastH * view.height;
+                        var lonlat = projection.invert([sx, sy]);
+                        if (!lonlat) continue;
+                        var lon = lonlat[0], lat = lonlat[1];
+                        var ix = Math.round((lon + 180) / 360 * (relief.img.width - 1));
+                        var iy = Math.round((90 - lat) / 180 * (relief.img.height - 1));
+                        if (ix < 0 || ix >= relief.img.width || iy < 0 || iy >= relief.img.height) continue;
+                        var idx = (iy * relief.img.width + ix) * 4;
+                        var oidx = (y * fastW + x) * 4;
+                        outImg.data[oidx] = relief.data[idx];
+                        outImg.data[oidx+1] = relief.data[idx+1];
+                        outImg.data[oidx+2] = relief.data[idx+2];
+                        outImg.data[oidx+3] = Math.round(relief.data[idx+3] * 0.7);
+                    }
+                }
+                fastCtx.putImageData(outImg, 0, 0);
+                // Draw upscaled to main canvas
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(reliefFastCanvas, 0, 0, view.width, view.height);
+            } else {
+                // Full-res mode
+                var outImg = ctx.createImageData(view.width, view.height);
+                var projection = globe.projection;
+                for (var y = 0; y < view.height; y++) {
+                    for (var x = 0; x < view.width; x++) {
+                        var lonlat = projection.invert([x, y]);
+                        if (!lonlat) continue;
+                        var lon = lonlat[0], lat = lonlat[1];
+                        var ix = Math.round((lon + 180) / 360 * (relief.img.width - 1));
+                        var iy = Math.round((90 - lat) / 180 * (relief.img.height - 1));
+                        if (ix < 0 || ix >= relief.img.width || iy < 0 || iy >= relief.img.height) continue;
+                        var idx = (iy * relief.img.width + ix) * 4;
+                        var oidx = (y * view.width + x) * 4;
+                        outImg.data[oidx] = relief.data[idx];
+                        outImg.data[oidx+1] = relief.data[idx+1];
+                        outImg.data[oidx+2] = relief.data[idx+2];
+                        outImg.data[oidx+3] = Math.round(relief.data[idx+3] * 0.7);
+                    }
+                }
+                ctx.putImageData(outImg, 0, 0);
+            }
+        }
+
+        
         var path = d3.geo.path().projection(globe.projection).pointRadius(7);
         var coastline = d3.select(".coastline");
         var lakes = d3.select(".lakes");
+        // Ensure a dedicated group for the relief layer exists as the first child of #map
+        // var reliefLayer = d3.select("#map").select(".relief-layer");
+        // if (reliefLayer.empty()) {
+        //     reliefLayer = d3.select("#map").insert("g", ":first-child").attr("class", "relief-layer");
+        // }
         d3.selectAll("path").attr("d", path);  // do an initial draw -- fixes issue with safari
 
         function drawLocationMark(point, coord) {
             // show the location on the map if defined
-            if (fieldAgent.value() && !fieldAgent.value().isInsideBoundary(point[0], point[1])) {
-                // UNDONE: Sometimes this is invoked on an old, released field, because new one has not been
-                //         built yet, causing the mark to not get drawn.
-                return;  // outside the field boundary, so ignore.
-            }
+            // if (fieldAgent.value() && !fieldAgent.value().isInsideBoundary(point[0], point[1])) {
+            //     // UNDONE: Sometimes this is invoked on an old, released field, because new one has not been
+            //     //         built yet, causing the mark to not get drawn.
+            //     return;  // outside the field boundary, so ignore.
+            // }
             if (coord && _.isFinite(coord[0]) && _.isFinite(coord[1])) {
                 var mark = d3.select(".location-mark");
                 if (!mark.node()) {
@@ -326,8 +466,36 @@
         var REDRAW_WAIT = 5;  // milliseconds
         var doDraw_throttled = _.throttle(doDraw, REDRAW_WAIT, {leading: false});
 
+        // Relief redraw timer logic
+        var reliefRedrawTimer = null;
+        var reliefRedrawPending = false;
+        var RELIEF_FRAME_MS = 60; // ~16 FPS
+        function redrawRelief_throttled() {
+            if (reliefRedrawTimer) {
+                reliefRedrawPending = true;
+                return;
+            }
+            useReliefLo = true;
+            drawRelief();
+            reliefRedrawTimer = setTimeout(function() {
+                reliefRedrawTimer = null;
+                if (reliefRedrawPending) {
+                    reliefRedrawPending = false;
+                    redrawRelief_throttled();
+                }
+            }, RELIEF_FRAME_MS);
+        }
+
+        // If view size changes, update fast canvas size
+        function updateReliefFastCanvas() {
+            reliefFastCanvas.width = Math.round(view.width * reliefFastScale);
+            reliefFastCanvas.height = Math.round(view.height * reliefFastScale);
+        }
+
         function doDraw() {
             d3.selectAll("path").attr("d", path);
+            useReliefLo = false;
+            drawRelief();
             rendererAgent.trigger("redraw");
             doDraw_throttled = _.throttle(doDraw, REDRAW_WAIT, {leading: false});
         }
@@ -338,24 +506,37 @@
                 moveStart: function() {
                     coastline.datum(mesh.coastLo);
                     lakes.datum(mesh.lakesLo);
+                    useReliefLo = true;
                     rendererAgent.trigger("start");
                 },
                 move: function() {
+                    useReliefLo = true;
+                    redrawRelief_throttled();
                     doDraw_throttled();
                 },
                 moveEnd: function() {
                     coastline.datum(mesh.coastHi);
                     lakes.datum(mesh.lakesHi);
+                    useReliefLo = false;
+                    doDraw();
                     d3.selectAll("path").attr("d", path);
                     rendererAgent.trigger("render");
                 },
                 click: drawLocationMark
             });
-
+        // var contours = d3.select(".contours");
+        // if (!contours.node()) {
+        //     contours = d3.select("#map").append("path").attr("class", "contours");
+        // }
+        // contours.datum(mesh.contourLo).attr("d", path);
         // Finally, inject the globe model into the input controller. Do it on the next event turn to ensure
         // renderer is fully set up before events start flowing.
         when(true).then(function() {
             inputController.globe(globe);
+        });
+        updateReliefFastCanvas();
+        loadReliefImages(function() {
+            doDraw();
         });
 
         log.timeEnd("rendering map");
@@ -544,100 +725,100 @@
         return d.promise;
     }
 
-    function animate(globe, field, grids) {
-        if (!globe || !field || !grids) return;
+    // function animate(globe, field, grids) {
+    //     if (!globe || !field || !grids) return;
 
-        var cancel = this.cancel;
-        var bounds = globe.bounds(view);
-        // maxIntensity is the velocity at which particle color intensity is maximum
-        var colorStyles = µ.windIntensityColorScale(INTENSITY_SCALE_STEP, grids.primaryGrid.particles.maxIntensity);
-        var buckets = colorStyles.map(function() { return []; });
-        var particleCount = Math.round(bounds.width * PARTICLE_MULTIPLIER);
-        if (µ.isMobile()) {
-            particleCount *= PARTICLE_REDUCTION;
-        }
-        var fadeFillStyle = µ.isFF() ? "rgba(0, 0, 0, 0.95)" : "rgba(0, 0, 0, 0.97)";  // FF Mac alpha behaves oddly
+    //     var cancel = this.cancel;
+    //     var bounds = globe.bounds(view);
+    //     // maxIntensity is the velocity at which particle color intensity is maximum
+    //     var colorStyles = µ.windIntensityColorScale(INTENSITY_SCALE_STEP, grids.primaryGrid.particles.maxIntensity);
+    //     var buckets = colorStyles.map(function() { return []; });
+    //     var particleCount = Math.round(bounds.width * PARTICLE_MULTIPLIER);
+    //     if (µ.isMobile()) {
+    //         particleCount *= PARTICLE_REDUCTION;
+    //     }
+    //     var fadeFillStyle = µ.isFF() ? "rgba(0, 0, 0, 0.95)" : "rgba(0, 0, 0, 0.97)";  // FF Mac alpha behaves oddly
 
-        log.debug("particle count: " + particleCount);
-        var particles = [];
-        for (var i = 0; i < particleCount; i++) {
-            particles.push(field.randomize({age: _.random(0, MAX_PARTICLE_AGE)}));
-        }
+    //     log.debug("particle count: " + particleCount);
+    //     var particles = [];
+    //     for (var i = 0; i < particleCount; i++) {
+    //         particles.push(field.randomize({age: _.random(0, MAX_PARTICLE_AGE)}));
+    //     }
 
-        function evolve() {
-            buckets.forEach(function(bucket) { bucket.length = 0; });
-            particles.forEach(function(particle) {
-                if (particle.age > MAX_PARTICLE_AGE) {
-                    field.randomize(particle).age = 0;
-                }
-                var x = particle.x;
-                var y = particle.y;
-                var v = field(x, y);  // vector at current position
-                var m = v[2];
-                if (m === null) {
-                    particle.age = MAX_PARTICLE_AGE;  // particle has escaped the grid, never to return...
-                }
-                else {
-                    var xt = x + v[0];
-                    var yt = y + v[1];
-                    if (field.isDefined(xt, yt)) {
-                        // Path from (x,y) to (xt,yt) is visible, so add this particle to the appropriate draw bucket.
-                        particle.xt = xt;
-                        particle.yt = yt;
-                        buckets[colorStyles.indexFor(m)].push(particle);
-                    }
-                    else {
-                        // Particle isn't visible, but it still moves through the field.
-                        particle.x = xt;
-                        particle.y = yt;
-                    }
-                }
-                particle.age += 1;
-            });
-        }
+    //     function evolve() {
+    //         buckets.forEach(function(bucket) { bucket.length = 0; });
+    //         particles.forEach(function(particle) {
+    //             if (particle.age > MAX_PARTICLE_AGE) {
+    //                 field.randomize(particle).age = 0;
+    //             }
+    //             var x = particle.x;
+    //             var y = particle.y;
+    //             var v = field(x, y);  // vector at current position
+    //             var m = v[2];
+    //             if (m === null) {
+    //                 particle.age = MAX_PARTICLE_AGE;  // particle has escaped the grid, never to return...
+    //             }
+    //             else {
+    //                 var xt = x + v[0];
+    //                 var yt = y + v[1];
+    //                 if (field.isDefined(xt, yt)) {
+    //                     // Path from (x,y) to (xt,yt) is visible, so add this particle to the appropriate draw bucket.
+    //                     particle.xt = xt;
+    //                     particle.yt = yt;
+    //                     buckets[colorStyles.indexFor(m)].push(particle);
+    //                 }
+    //                 else {
+    //                     // Particle isn't visible, but it still moves through the field.
+    //                     particle.x = xt;
+    //                     particle.y = yt;
+    //                 }
+    //             }
+    //             particle.age += 1;
+    //         });
+    //     }
 
-        var g = d3.select("#animation").node().getContext("2d");
-        g.lineWidth = PARTICLE_LINE_WIDTH;
-        g.fillStyle = fadeFillStyle;
+    //     var g = d3.select("#animation").node().getContext("2d");
+    //     g.lineWidth = PARTICLE_LINE_WIDTH;
+    //     g.fillStyle = fadeFillStyle;
 
-        function draw() {
-            // Fade existing particle trails.
-            var prev = g.globalCompositeOperation;
-            g.globalCompositeOperation = "destination-in";
-            g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-            g.globalCompositeOperation = prev;
+    //     function draw() {
+    //         // Fade existing particle trails.
+    //         var prev = g.globalCompositeOperation;
+    //         g.globalCompositeOperation = "destination-in";
+    //         g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    //         g.globalCompositeOperation = prev;
 
-            // Draw new particle trails.
-            buckets.forEach(function(bucket, i) {
-                if (bucket.length > 0) {
-                    g.beginPath();
-                    g.strokeStyle = colorStyles[i];
-                    bucket.forEach(function(particle) {
-                        g.moveTo(particle.x, particle.y);
-                        g.lineTo(particle.xt, particle.yt);
-                        particle.x = particle.xt;
-                        particle.y = particle.yt;
-                    });
-                    g.stroke();
-                }
-            });
-        }
+    //         // Draw new particle trails.
+    //         buckets.forEach(function(bucket, i) {
+    //             if (bucket.length > 0) {
+    //                 g.beginPath();
+    //                 g.strokeStyle = colorStyles[i];
+    //                 bucket.forEach(function(particle) {
+    //                     g.moveTo(particle.x, particle.y);
+    //                     g.lineTo(particle.xt, particle.yt);
+    //                     particle.x = particle.xt;
+    //                     particle.y = particle.yt;
+    //                 });
+    //                 g.stroke();
+    //             }
+    //         });
+    //     }
 
-        (function frame() {
-            try {
-                if (cancel.requested) {
-                    field.release();
-                    return;
-                }
-                evolve();
-                draw();
-                setTimeout(frame, FRAME_RATE);
-            }
-            catch (e) {
-                report.error(e);
-            }
-        })();
-    }
+    //     (function frame() {
+    //         try {
+    //             if (cancel.requested) {
+    //                 field.release();
+    //                 return;
+    //             }
+    //             evolve();
+    //             draw();
+    //             setTimeout(frame, FRAME_RATE);
+    //         }
+    //         catch (e) {
+    //             report.error(e);
+    //         }
+    //     })();
+    // }
 
     function drawGridPoints(ctx, grid, globe) {
         if (!grid || !globe || !configuration.get("showGridPoints")) return;
@@ -656,41 +837,41 @@
         });
     }
 
-    function drawOverlay(field, overlayType) {
-        if (!field) return;
+    // function drawOverlay(field, overlayType) {
+    //     if (!field) return;
 
-        var ctx = d3.select("#overlay").node().getContext("2d"), grid = (gridAgent.value() || {}).overlayGrid;
+    //     var ctx = d3.select("#overlay").node().getContext("2d"), grid = (gridAgent.value() || {}).overlayGrid;
 
-        µ.clearCanvas(d3.select("#overlay").node());
-        µ.clearCanvas(d3.select("#scale").node());
-        if (overlayType) {
-            if (overlayType !== "off") {
-                ctx.putImageData(field.overlay, 0, 0);
-            }
-            drawGridPoints(ctx, grid, globeAgent.value());
-        }
+    //     µ.clearCanvas(d3.select("#overlay").node());
+    //     µ.clearCanvas(d3.select("#scale").node());
+    //     if (overlayType) {
+    //         if (overlayType !== "off") {
+    //             ctx.putImageData(field.overlay, 0, 0);
+    //         }
+    //         drawGridPoints(ctx, grid, globeAgent.value());
+    //     }
 
-        if (grid) {
-            // Draw color bar for reference.
-            var colorBar = d3.select("#scale"), scale = grid.scale, bounds = scale.bounds;
-            var c = colorBar.node(), g = c.getContext("2d"), n = c.width - 1;
-            for (var i = 0; i <= n; i++) {
-                var rgb = scale.gradient(µ.spread(i / n, bounds[0], bounds[1]), 1);
-                g.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
-                g.fillRect(i, 0, 1, c.height);
-            }
+    //     if (grid) {
+    //         // Draw color bar for reference.
+    //         var colorBar = d3.select("#scale"), scale = grid.scale, bounds = scale.bounds;
+    //         var c = colorBar.node(), g = c.getContext("2d"), n = c.width - 1;
+    //         for (var i = 0; i <= n; i++) {
+    //             var rgb = scale.gradient(µ.spread(i / n, bounds[0], bounds[1]), 1);
+    //             g.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
+    //             g.fillRect(i, 0, 1, c.height);
+    //         }
 
-            // Show tooltip on hover.
-            colorBar.on("mousemove", function() {
-                var x = d3.mouse(this)[0];
-                var pct = µ.clamp((Math.round(x) - 2) / (n - 2), 0, 1);
-                var value = µ.spread(pct, bounds[0], bounds[1]);
-                var elementId = grid.type === "wind" ? "#location-wind-units" : "#location-value-units";
-                var units = createUnitToggle(elementId, grid).value();
-                colorBar.attr("title", µ.formatScalar(value, units) + " " + units.label);
-            });
-        }
-    }
+    //         // Show tooltip on hover.
+    //         colorBar.on("mousemove", function() {
+    //             var x = d3.mouse(this)[0];
+    //             var pct = µ.clamp((Math.round(x) - 2) / (n - 2), 0, 1);
+    //             var value = µ.spread(pct, bounds[0], bounds[1]);
+    //             var elementId = grid.type === "wind" ? "#location-wind-units" : "#location-value-units";
+    //             var units = createUnitToggle(elementId, grid).value();
+    //             colorBar.attr("title", µ.formatScalar(value, units) + " " + units.label);
+    //         });
+    //     }
+    // }
 
     /**
      * Extract the date the grids are valid, or the current date if no grid is available.
@@ -794,7 +975,8 @@
     function showLocationDetails(point, coord) {
         point = point || [];
         coord = coord || [];
-        var grids = gridAgent.value(), field = fieldAgent.value(), λ = coord[0], φ = coord[1];
+        // var grids = gridAgent.value(), field = fieldAgent.value(), λ = coord[0], φ = coord[1];
+        var grids = gridAgent.value(), λ = coord[0], φ = coord[1];
         if (!field || !field.isInsideBoundary(point[0], point[1])) {
             return;
         }
@@ -838,12 +1020,12 @@
         }
     }
 
-    function stopCurrentAnimation(alsoClearCanvas) {
-        animatorAgent.cancel();
-        if (alsoClearCanvas) {
-            µ.clearCanvas(d3.select("#animation").node());
-        }
-    }
+    // function stopCurrentAnimation(alsoClearCanvas) {
+    //     // animatorAgent.cancel();
+    //     if (alsoClearCanvas) {
+    //         µ.clearCanvas(d3.select("#animation").node());
+    //     }
+    // }
 
     /**
      * Registers a click event handler for the specified DOM element which modifies the configuration to have
@@ -972,41 +1154,41 @@
         rendererAgent.listenTo(meshAgent, "update", startRendering);
         rendererAgent.listenTo(globeAgent, "update", startRendering);
 
-        function startInterpolation() {
-            fieldAgent.submit(interpolateField, globeAgent.value(), gridAgent.value());
-        }
-        function cancelInterpolation() {
-            fieldAgent.cancel();
-        }
-        fieldAgent.listenTo(gridAgent, "update", startInterpolation);
-        fieldAgent.listenTo(rendererAgent, "render", startInterpolation);
-        fieldAgent.listenTo(rendererAgent, "start", cancelInterpolation);
-        fieldAgent.listenTo(rendererAgent, "redraw", cancelInterpolation);
+        // function startInterpolation() {
+        //     fieldAgent.submit(interpolateField, globeAgent.value(), gridAgent.value());
+        // }
+        // function cancelInterpolation() {
+        //     fieldAgent.cancel();
+        // }
+        // fieldAgent.listenTo(gridAgent, "update", startInterpolation);
+        // fieldAgent.listenTo(rendererAgent, "render", startInterpolation);
+        // fieldAgent.listenTo(rendererAgent, "start", cancelInterpolation);
+        // fieldAgent.listenTo(rendererAgent, "redraw", cancelInterpolation);
 
-        animatorAgent.listenTo(fieldAgent, "update", function(field) {
-            animatorAgent.submit(animate, globeAgent.value(), field, gridAgent.value());
-        });
-        animatorAgent.listenTo(rendererAgent, "start", stopCurrentAnimation.bind(null, true));
-        animatorAgent.listenTo(gridAgent, "submit", stopCurrentAnimation.bind(null, false));
-        animatorAgent.listenTo(fieldAgent, "submit", stopCurrentAnimation.bind(null, false));
+        // animatorAgent.listenTo(fieldAgent, "update", function(field) {
+        //     animatorAgent.submit(animate, globeAgent.value(), field, gridAgent.value());
+        // });
+        // animatorAgent.listenTo(rendererAgent, "start", stopCurrentAnimation.bind(null, true));
+        // animatorAgent.listenTo(gridAgent, "submit", stopCurrentAnimation.bind(null, false));
+        // animatorAgent.listenTo(fieldAgent, "submit", stopCurrentAnimation.bind(null, false));
 
-        overlayAgent.listenTo(fieldAgent, "update", function() {
-            overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
-        });
-        overlayAgent.listenTo(rendererAgent, "start", function() {
-            overlayAgent.submit(drawOverlay, fieldAgent.value(), null);
-        });
-        overlayAgent.listenTo(configuration, "change", function() {
-            var changed = _.keys(configuration.changedAttributes())
-            // if only overlay relevant flags have changed...
-            if (_.intersection(changed, ["overlayType", "showGridPoints"]).length > 0) {
-                overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
-            }
-        });
+        // overlayAgent.listenTo(fieldAgent, "update", function() {
+        //     overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
+        // });
+        // overlayAgent.listenTo(rendererAgent, "start", function() {
+        //     overlayAgent.submit(drawOverlay, fieldAgent.value(), null);
+        // });
+        // overlayAgent.listenTo(configuration, "change", function() {
+        //     var changed = _.keys(configuration.changedAttributes())
+        //     // if only overlay relevant flags have changed...
+        //     if (_.intersection(changed, ["overlayType", "showGridPoints"]).length > 0) {
+        //         overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
+        //     }
+        // });
 
         // Add event handlers for showing, updating, and removing location details.
         inputController.on("click", showLocationDetails);
-        fieldAgent.on("update", updateLocationDetails);
+        // fieldAgent.on("update", updateLocationDetails);
         d3.select("#location-close").on("click", _.partial(clearLocationDetails, true));
 
         // Modify menu depending on what mode we're in.
