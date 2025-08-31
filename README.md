@@ -1,7 +1,9 @@
 earth
 =====
 Modification notes from Viet
+- turning the earth to GIA earth
 - No need wind, wave so I comment out the animate, animatorAgent, and fieldAgen in the `earth.js`
+<p align=center><img src="public/image.png" style="max-width:500px; width:100%;" alt="image" /></p>>
 
 **NOTE: the location of `dev-server.js` has changed from `{repository}/server/` to `{repository}/`**
 
