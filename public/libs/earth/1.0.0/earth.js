@@ -58,7 +58,7 @@
             progress: function(amount) {  // amount of progress to report in the range [0, 1]
                 if (0 <= amount && amount < 1) {
                     var i = Math.ceil(amount * total);
-                    var bar = COMPLETED.substr(0, i) + REMAINING.substr(0, total - i);
+                    var bar = COMPLETED.slice(0, i) + REMAINING.slice(0, total - i);
                     return p.classed("invisible", false).text(bar);
                 }
                 return p.classed("invisible", true).text("");  // progress complete
@@ -524,12 +524,10 @@
         dispatch.listenTo(
             inputController, {
                 moveStart: function() {
-                    if (!isDragging) {
-                        isDragging = true;
-                        coastline.datum(mesh.coastLo);
-                        lakes.datum(mesh.lakesLo);
-                        rendererAgent.trigger("start");
-                    }
+                    // isDragging = true;
+                    coastline.datum(mesh.coastLo);
+                    lakes.datum(mesh.lakesLo);
+                    rendererAgent.trigger("start");
                     useReliefLo = true;
                 },
                 move: function() {
@@ -538,15 +536,13 @@
                     doDraw_throttled();
                 },
                 moveEnd: function() {
-                    if (isDragging) {
-                        isDragging = false;
-                        coastline.datum(mesh.coastHi);
-                        lakes.datum(mesh.lakesHi);
-                        useReliefLo = false;
-                        doDraw();
-                        d3.selectAll("path").attr("d", path);
-                        rendererAgent.trigger("render");
-                    }
+                    
+                    coastline.datum(mesh.coastHi);
+                    lakes.datum(mesh.lakesHi);
+                    useReliefLo = false;
+                    doDraw();
+                    d3.selectAll("path").attr("d", path);
+                    rendererAgent.trigger("render");
                 },
                 click: drawLocationMark
             });
@@ -560,7 +556,7 @@
         when(true).then(function() {
             inputController.globe(globe);
         });
-        updateReliefFastCanvas();
+        // updateReliefFastCanvas();
         loadReliefImages(function() {
             doDraw();
         });
