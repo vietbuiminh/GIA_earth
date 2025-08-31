@@ -277,7 +277,7 @@
         }
     }
 
-    function buildRenderer(mesh, globe) {
+        function buildRenderer(mesh, globe) {
         if (!mesh || !globe) return null;
 
         report.status("Rendering Globe...");
@@ -303,6 +303,16 @@
         var reliefFastCanvas = document.createElement("canvas");
         reliefFastCanvas.width = Math.round(view.width * reliefFastScale);
         reliefFastCanvas.height = Math.round(view.height * reliefFastScale);
+
+        // Relief overlay cache using stringified projection state as key
+        var reliefCache = {};
+        function getProjectionCacheKey(projection) {
+            // Use rotation, scale, and translate as cache key
+            var rot = projection.rotate ? projection.rotate() : [];
+            var scl = projection.scale ? projection.scale() : 1;
+            var tr = projection.translate ? projection.translate() : [];
+            return rot.join(",") + ":" + scl + ":" + tr.join(",") + ":" + view.width + ":" + view.height;
+        }
 
         // Create new map svg elements.
         globe.defineMap(d3.select("#map"), d3.select("#foreground"));
@@ -377,13 +387,21 @@
             if (!relief.loaded || !relief.data) return;
             var ctx = reliefCanvas.getContext("2d");
             ctx.clearRect(0, 0, view.width, view.height);
+            var projection = globe.projection;
+            var cacheKey = getProjectionCacheKey(projection);
+            if (!useReliefLo) {
+                var cached = reliefCache[cacheKey];
+                if (cached && cached.width === view.width && cached.height === view.height) {
+                    ctx.putImageData(cached, 0, 0);
+                    return;
+                }
+            }
             if (useReliefLo) {
                 // Fast mode: draw to small offscreen canvas, then upscale
                 var fastW = reliefFastCanvas.width;
                 var fastH = reliefFastCanvas.height;
                 var fastCtx = reliefFastCanvas.getContext("2d");
                 var outImg = fastCtx.createImageData(fastW, fastH);
-                var projection = globe.projection;
                 for (var y = 0; y < fastH; y++) {
                     for (var x = 0; x < fastW; x++) {
                         var sx = x / fastW * view.width;
@@ -403,13 +421,11 @@
                     }
                 }
                 fastCtx.putImageData(outImg, 0, 0);
-                // Draw upscaled to main canvas
                 ctx.imageSmoothingEnabled = false;
                 ctx.drawImage(reliefFastCanvas, 0, 0, view.width, view.height);
             } else {
-                // Full-res mode
+                // Full-res mode, cache result
                 var outImg = ctx.createImageData(view.width, view.height);
-                var projection = globe.projection;
                 for (var y = 0; y < view.height; y++) {
                     for (var x = 0; x < view.width; x++) {
                         var lonlat = projection.invert([x, y]);
@@ -427,6 +443,7 @@
                     }
                 }
                 ctx.putImageData(outImg, 0, 0);
+                reliefCache[cacheKey] = outImg;
             }
         }
 
@@ -458,9 +475,9 @@
         }
 
         // Draw the location mark if one is currently visible.
-        if (activeLocation.point && activeLocation.coord) {
-            drawLocationMark(activeLocation.point, activeLocation.coord);
-        }
+        // if (activeLocation.point && activeLocation.coord) {
+        //     drawLocationMark(activeLocation.point, activeLocation.coord);
+        // }
 
         // Throttled draw method helps with slow devices that would get overwhelmed by too many redraw events.
         var REDRAW_WAIT = 5;  // milliseconds
@@ -490,24 +507,30 @@
         function updateReliefFastCanvas() {
             reliefFastCanvas.width = Math.round(view.width * reliefFastScale);
             reliefFastCanvas.height = Math.round(view.height * reliefFastScale);
+            // Invalidate relief cache on resize
+            reliefCache = {};
         }
 
         function doDraw() {
             d3.selectAll("path").attr("d", path);
-            useReliefLo = false;
+            // Do NOT set useReliefLo here; it is managed by moveStart/move/moveEnd only
             drawRelief();
             rendererAgent.trigger("redraw");
             doDraw_throttled = _.throttle(doDraw, REDRAW_WAIT, {leading: false});
         }
 
         // Attach to map rendering events on input controller.
+        var isDragging = false;
         dispatch.listenTo(
             inputController, {
                 moveStart: function() {
-                    coastline.datum(mesh.coastLo);
-                    lakes.datum(mesh.lakesLo);
+                    if (!isDragging) {
+                        isDragging = true;
+                        coastline.datum(mesh.coastLo);
+                        lakes.datum(mesh.lakesLo);
+                        rendererAgent.trigger("start");
+                    }
                     useReliefLo = true;
-                    rendererAgent.trigger("start");
                 },
                 move: function() {
                     useReliefLo = true;
@@ -515,12 +538,15 @@
                     doDraw_throttled();
                 },
                 moveEnd: function() {
-                    coastline.datum(mesh.coastHi);
-                    lakes.datum(mesh.lakesHi);
-                    useReliefLo = false;
-                    doDraw();
-                    d3.selectAll("path").attr("d", path);
-                    rendererAgent.trigger("render");
+                    if (isDragging) {
+                        isDragging = false;
+                        coastline.datum(mesh.coastHi);
+                        lakes.datum(mesh.lakesHi);
+                        useReliefLo = false;
+                        doDraw();
+                        d3.selectAll("path").attr("d", path);
+                        rendererAgent.trigger("render");
+                    }
                 },
                 click: drawLocationMark
             });
@@ -576,154 +602,154 @@
         };
     }
 
-    function createField(columns, bounds, mask) {
+    // function createField(columns, bounds, mask) {
 
-        /**
-         * @returns {Array} wind vector [u, v, magnitude] at the point (x, y), or [NaN, NaN, null] if wind
-         *          is undefined at that point.
-         */
-        function field(x, y) {
-            var column = columns[Math.round(x)];
-            return column && column[Math.round(y)] || NULL_WIND_VECTOR;
-        }
+    //     /**
+    //      * @returns {Array} wind vector [u, v, magnitude] at the point (x, y), or [NaN, NaN, null] if wind
+    //      *          is undefined at that point.
+    //      */
+    //     function field(x, y) {
+    //         var column = columns[Math.round(x)];
+    //         return column && column[Math.round(y)] || NULL_WIND_VECTOR;
+    //     }
 
-        /**
-         * @returns {boolean} true if the field is valid at the point (x, y)
-         */
-        field.isDefined = function(x, y) {
-            return field(x, y)[2] !== null;
-        };
+    //     /**
+    //      * @returns {boolean} true if the field is valid at the point (x, y)
+    //      */
+    //     field.isDefined = function(x, y) {
+    //         return field(x, y)[2] !== null;
+    //     };
 
-        /**
-         * @returns {boolean} true if the point (x, y) lies inside the outer boundary of the vector field, even if
-         *          the vector field has a hole (is undefined) at that point, such as at an island in a field of
-         *          ocean currents.
-         */
-        field.isInsideBoundary = function(x, y) {
-            return field(x, y) !== NULL_WIND_VECTOR;
-        };
+    //     /**
+    //      * @returns {boolean} true if the point (x, y) lies inside the outer boundary of the vector field, even if
+    //      *          the vector field has a hole (is undefined) at that point, such as at an island in a field of
+    //      *          ocean currents.
+    //      */
+    //     field.isInsideBoundary = function(x, y) {
+    //         return field(x, y) !== NULL_WIND_VECTOR;
+    //     };
 
-        // Frees the massive "columns" array for GC. Without this, the array is leaked (in Chrome) each time a new
-        // field is interpolated because the field closure's context is leaked, for reasons that defy explanation.
-        field.release = function() {
-            columns = [];
-        };
+    //     // Frees the massive "columns" array for GC. Without this, the array is leaked (in Chrome) each time a new
+    //     // field is interpolated because the field closure's context is leaked, for reasons that defy explanation.
+    //     field.release = function() {
+    //         columns = [];
+    //     };
 
-        field.randomize = function(o) {  // UNDONE: this method is terrible
-            var x, y;
-            var safetyNet = 0;
-            do {
-                x = Math.round(_.random(bounds.x, bounds.xMax));
-                y = Math.round(_.random(bounds.y, bounds.yMax));
-            } while (!field.isDefined(x, y) && safetyNet++ < 30);
-            o.x = x;
-            o.y = y;
-            return o;
-        };
+    //     field.randomize = function(o) {  // UNDONE: this method is terrible
+    //         var x, y;
+    //         var safetyNet = 0;
+    //         do {
+    //             x = Math.round(_.random(bounds.x, bounds.xMax));
+    //             y = Math.round(_.random(bounds.y, bounds.yMax));
+    //         } while (!field.isDefined(x, y) && safetyNet++ < 30);
+    //         o.x = x;
+    //         o.y = y;
+    //         return o;
+    //     };
 
-        field.overlay = mask.imageData;
+    //     field.overlay = mask.imageData;
 
-        return field;
-    }
+    //     return field;
+    // }
 
     /**
      * Calculate distortion of the wind vector caused by the shape of the projection at point (x, y). The wind
      * vector is modified in place and returned by this function.
      */
-    function distort(projection, λ, φ, x, y, scale, wind) {
-        var u = wind[0] * scale;
-        var v = wind[1] * scale;
-        var d = µ.distortion(projection, λ, φ, x, y);
+    // function distort(projection, λ, φ, x, y, scale, wind) {
+    //     var u = wind[0] * scale;
+    //     var v = wind[1] * scale;
+    //     var d = µ.distortion(projection, λ, φ, x, y);
 
-        // Scale distortion vectors by u and v, then add.
-        wind[0] = d[0] * u + d[2] * v;
-        wind[1] = d[1] * u + d[3] * v;
-        return wind;
-    }
+    //     // Scale distortion vectors by u and v, then add.
+    //     wind[0] = d[0] * u + d[2] * v;
+    //     wind[1] = d[1] * u + d[3] * v;
+    //     return wind;
+    // }
 
-    function interpolateField(globe, grids) {
-        if (!globe || !grids) return null;
+    // function interpolateField(globe, grids) {
+    //     if (!globe || !grids) return null;
 
-        var mask = createMask(globe);
-        var primaryGrid = grids.primaryGrid;
-        var overlayGrid = grids.overlayGrid;
+    //     var mask = createMask(globe);
+    //     var primaryGrid = grids.primaryGrid;
+    //     var overlayGrid = grids.overlayGrid;
 
-        log.time("interpolating field");
-        var d = when.defer(), cancel = this.cancel;
+    //     log.time("interpolating field");
+    //     var d = when.defer(), cancel = this.cancel;
 
-        var projection = globe.projection;
-        var bounds = globe.bounds(view);
-        // How fast particles move on the screen (arbitrary value chosen for aesthetics).
-        var velocityScale = bounds.height * primaryGrid.particles.velocityScale;
+    //     var projection = globe.projection;
+    //     var bounds = globe.bounds(view);
+    //     // How fast particles move on the screen (arbitrary value chosen for aesthetics).
+    //     var velocityScale = bounds.height * primaryGrid.particles.velocityScale;
 
-        var columns = [];
-        var point = [];
-        var x = bounds.x;
-        var interpolate = primaryGrid.interpolate;
-        var overlayInterpolate = overlayGrid.interpolate;
-        var hasDistinctOverlay = primaryGrid !== overlayGrid;
-        var scale = overlayGrid.scale;
+    //     var columns = [];
+    //     var point = [];
+    //     var x = bounds.x;
+    //     var interpolate = primaryGrid.interpolate;
+    //     var overlayInterpolate = overlayGrid.interpolate;
+    //     var hasDistinctOverlay = primaryGrid !== overlayGrid;
+    //     var scale = overlayGrid.scale;
 
-        function interpolateColumn(x) {
-            var column = [];
-            for (var y = bounds.y; y <= bounds.yMax; y += 2) {
-                if (mask.isVisible(x, y)) {
-                    point[0] = x; point[1] = y;
-                    var coord = projection.invert(point);
-                    var color = TRANSPARENT_BLACK;
-                    var wind = null;
-                    if (coord) {
-                        var λ = coord[0], φ = coord[1];
-                        if (isFinite(λ)) {
-                            wind = interpolate(λ, φ);
-                            var scalar = null;
-                            if (wind) {
-                                wind = distort(projection, λ, φ, x, y, velocityScale, wind);
-                                scalar = wind[2];
-                            }
-                            if (hasDistinctOverlay) {
-                                scalar = overlayInterpolate(λ, φ);
-                            }
-                            if (µ.isValue(scalar)) {
-                                color = scale.gradient(scalar, OVERLAY_ALPHA);
-                            }
-                        }
-                    }
-                    column[y+1] = column[y] = wind || HOLE_VECTOR;
-                    mask.set(x, y, color).set(x+1, y, color).set(x, y+1, color).set(x+1, y+1, color);
-                }
-            }
-            columns[x+1] = columns[x] = column;
-        }
+    //     function interpolateColumn(x) {
+    //         var column = [];
+    //         for (var y = bounds.y; y <= bounds.yMax; y += 2) {
+    //             if (mask.isVisible(x, y)) {
+    //                 point[0] = x; point[1] = y;
+    //                 var coord = projection.invert(point);
+    //                 var color = TRANSPARENT_BLACK;
+    //                 var wind = null;
+    //                 if (coord) {
+    //                     var λ = coord[0], φ = coord[1];
+    //                     if (isFinite(λ)) {
+    //                         wind = interpolate(λ, φ);
+    //                         var scalar = null;
+    //                         if (wind) {
+    //                             wind = distort(projection, λ, φ, x, y, velocityScale, wind);
+    //                             scalar = wind[2];
+    //                         }
+    //                         if (hasDistinctOverlay) {
+    //                             scalar = overlayInterpolate(λ, φ);
+    //                         }
+    //                         if (µ.isValue(scalar)) {
+    //                             color = scale.gradient(scalar, OVERLAY_ALPHA);
+    //                         }
+    //                     }
+    //                 }
+    //                 column[y+1] = column[y] = wind || HOLE_VECTOR;
+    //                 mask.set(x, y, color).set(x+1, y, color).set(x, y+1, color).set(x+1, y+1, color);
+    //             }
+    //         }
+    //         columns[x+1] = columns[x] = column;
+    //     }
 
-        report.status("");
+    //     report.status("");
 
-        (function batchInterpolate() {
-            try {
-                if (!cancel.requested) {
-                    var start = Date.now();
-                    while (x < bounds.xMax) {
-                        interpolateColumn(x);
-                        x += 2;
-                        if ((Date.now() - start) > MAX_TASK_TIME) {
-                            // Interpolation is taking too long. Schedule the next batch for later and yield.
-                            report.progress((x - bounds.x) / (bounds.xMax - bounds.x));
-                            setTimeout(batchInterpolate, MIN_SLEEP_TIME);
-                            return;
-                        }
-                    }
-                }
-                d.resolve(createField(columns, bounds, mask));
-            }
-            catch (e) {
-                d.reject(e);
-            }
-            report.progress(1);  // 100% complete
-            log.timeEnd("interpolating field");
-        })();
+    //     (function batchInterpolate() {
+    //         try {
+    //             if (!cancel.requested) {
+    //                 var start = Date.now();
+    //                 while (x < bounds.xMax) {
+    //                     interpolateColumn(x);
+    //                     x += 2;
+    //                     if ((Date.now() - start) > MAX_TASK_TIME) {
+    //                         // Interpolation is taking too long. Schedule the next batch for later and yield.
+    //                         report.progress((x - bounds.x) / (bounds.xMax - bounds.x));
+    //                         setTimeout(batchInterpolate, MIN_SLEEP_TIME);
+    //                         return;
+    //                     }
+    //                 }
+    //             }
+    //             d.resolve(createField(columns, bounds, mask));
+    //         }
+    //         catch (e) {
+    //             d.reject(e);
+    //         }
+    //         report.progress(1);  // 100% complete
+    //         log.timeEnd("interpolating field");
+    //     })();
 
-        return d.promise;
-    }
+    //     return d.promise;
+    // }
 
     // function animate(globe, field, grids) {
     //     if (!globe || !field || !grids) return;
@@ -965,60 +991,60 @@
 
     // Stores the point and coordinate of the currently visible location. This is used to update the location
     // details when the field changes.
-    var activeLocation = {};
+    // var activeLocation = {};
 
     /**
      * Display a local data callout at the given [x, y] point and its corresponding [lon, lat] coordinates.
      * The location may not be valid, in which case no callout is displayed. Display location data for both
      * the primary grid and overlay grid, performing interpolation when necessary.
      */
-    function showLocationDetails(point, coord) {
-        point = point || [];
-        coord = coord || [];
-        // var grids = gridAgent.value(), field = fieldAgent.value(), λ = coord[0], φ = coord[1];
-        var grids = gridAgent.value(), λ = coord[0], φ = coord[1];
-        if (!field || !field.isInsideBoundary(point[0], point[1])) {
-            return;
-        }
+    // function showLocationDetails(point, coord) {
+    //     point = point || [];
+    //     coord = coord || [];
+    //     // var grids = gridAgent.value(), field = fieldAgent.value(), λ = coord[0], φ = coord[1];
+    //     var grids = gridAgent.value(), λ = coord[0], φ = coord[1];
+    //     if (!field || !field.isInsideBoundary(point[0], point[1])) {
+    //         return;
+    //     }
 
-        clearLocationDetails(false);  // clean the slate
-        activeLocation = {point: point, coord: coord};  // remember where the current location is
+    //     clearLocationDetails(false);  // clean the slate
+    //     activeLocation = {point: point, coord: coord};  // remember where the current location is
 
-        if (_.isFinite(λ) && _.isFinite(φ)) {
-            d3.select("#location-coord").text(µ.formatCoordinates(λ, φ));
-            d3.select("#location-close").classed("invisible", false);
-        }
+    //     if (_.isFinite(λ) && _.isFinite(φ)) {
+    //         d3.select("#location-coord").text(µ.formatCoordinates(λ, φ));
+    //         d3.select("#location-close").classed("invisible", false);
+    //     }
 
-        if (field.isDefined(point[0], point[1]) && grids) {
-            var wind = grids.primaryGrid.interpolate(λ, φ);
-            if (µ.isValue(wind)) {
-                showWindAtLocation(wind, grids.primaryGrid);
-            }
-            if (grids.overlayGrid !== grids.primaryGrid) {
-                var value = grids.overlayGrid.interpolate(λ, φ);
-                if (µ.isValue(value)) {
-                    showOverlayValueAtLocation(value, grids.overlayGrid);
-                }
-            }
-        }
-    }
+    //     if (field.isDefined(point[0], point[1]) && grids) {
+    //         var wind = grids.primaryGrid.interpolate(λ, φ);
+    //         if (µ.isValue(wind)) {
+    //             showWindAtLocation(wind, grids.primaryGrid);
+    //         }
+    //         if (grids.overlayGrid !== grids.primaryGrid) {
+    //             var value = grids.overlayGrid.interpolate(λ, φ);
+    //             if (µ.isValue(value)) {
+    //                 showOverlayValueAtLocation(value, grids.overlayGrid);
+    //             }
+    //         }
+    //     }
+    // }
 
-    function updateLocationDetails() {
-        showLocationDetails(activeLocation.point, activeLocation.coord);
-    }
+    // function updateLocationDetails() {
+    //     showLocationDetails(activeLocation.point, activeLocation.coord);
+    // }
 
-    function clearLocationDetails(clearEverything) {
-        d3.select("#location-coord").text("");
-        d3.select("#location-close").classed("invisible", true);
-        d3.select("#location-wind").text("");
-        d3.select("#location-wind-units").text("");
-        d3.select("#location-value").text("");
-        d3.select("#location-value-units").text("");
-        if (clearEverything) {
-            activeLocation = {};
-            d3.select(".location-mark").remove();
-        }
-    }
+    // function clearLocationDetails(clearEverything) {
+    //     d3.select("#location-coord").text("");
+    //     d3.select("#location-close").classed("invisible", true);
+    //     d3.select("#location-wind").text("");
+    //     d3.select("#location-wind-units").text("");
+    //     d3.select("#location-value").text("");
+    //     d3.select("#location-value-units").text("");
+    //     if (clearEverything) {
+    //         activeLocation = {};
+    //         d3.select(".location-mark").remove();
+    //     }
+    // }
 
     // function stopCurrentAnimation(alsoClearCanvas) {
     //     // animatorAgent.cancel();
@@ -1187,9 +1213,9 @@
         // });
 
         // Add event handlers for showing, updating, and removing location details.
-        inputController.on("click", showLocationDetails);
+        // inputController.on("click", showLocationDetails);
         // fieldAgent.on("update", updateLocationDetails);
-        d3.select("#location-close").on("click", _.partial(clearLocationDetails, true));
+        // d3.select("#location-close").on("click", _.partial(clearLocationDetails, true));
 
         // Modify menu depending on what mode we're in.
         configuration.on("change:param", function(context, mode) {
