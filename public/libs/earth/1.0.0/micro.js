@@ -218,7 +218,7 @@ var µ = function() {
         var s = Math.sin(rad);
         var c = Math.cos(rad);
         var r = Math.floor(Math.max(0, -c) * 255);
-        var g = Math.floor(Math.max(s, 0) * 255);
+        var g = Math.floor(Math.max(s, 0) * 255); 
         var b = Math.floor(Math.max(c, 0, -s) * 255);
         return [r, g, b, a];
     }

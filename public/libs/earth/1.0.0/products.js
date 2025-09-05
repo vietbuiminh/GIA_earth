@@ -147,11 +147,18 @@ var products = function() {
                     ],
                     scale: {
                         bounds: [-10, 10],
-                        gradient: function(v, a) {
+                        // gradient: function(v, a) {
                             // Normalize v to [0, 1] for color mapping
-                            var t = Math.min(Math.max((v + 10) / 20, 0), 1);
-                            return µ.sinebowColor(t, a);
-                        }
+                            // var t = Math.min(Math.max((v + 10) / 20, 0), 1);
+                            // return µ.sinebowColor(t, a);
+                        // }
+                        gradient: µ.segmentedColorScale([
+                            [-10, [0, 0, 64]],   // Dark deep blue
+                            [-5, [0, 0, 255]],   // Deep blue
+                            [0, [255, 255, 255]], // White, fully transparent
+                            [5, [255, 0, 0]],    // Light red
+                            [10, [139, 0, 0]]     // Dark red
+                        ])
                     },
                     particles: {velocityScale: 1/60000, maxIntensity:  1}
                 });
