@@ -43,6 +43,152 @@ var globes = function() {
      */
     function standardGlobe() {
         return {
+            // Relief overlay state (per globe instance)
+            reliefHi: { img: null, data: null, loaded: false },
+            reliefLo: { img: null, data: null, loaded: false },
+            useReliefLo: false,
+            reliefFastScale: 0.25,
+            reliefFastCanvas: null,
+            reliefCanvas: null,
+            reliefCache: {},
+            // Initialize relief canvas and fast canvas
+            initReliefCanvas: function(view) {
+                if (!this.reliefCanvas) {
+                    this.reliefCanvas = document.getElementById("relief-canvas");
+                    if (!this.reliefCanvas) {
+                        this.reliefCanvas = document.createElement("canvas");
+                        this.reliefCanvas.id = "relief-canvas";
+                        this.reliefCanvas.className = "fill-screen";
+                        var display = document.getElementById("display");
+                        if (display) {
+                            display.insertBefore(this.reliefCanvas, display.children[1]);
+                        } else {
+                            document.body.appendChild(this.reliefCanvas);
+                        }
+                    }
+                }
+                this.reliefCanvas.width = view.width;
+                this.reliefCanvas.height = view.height;
+                if (!this.reliefFastCanvas) {
+                    this.reliefFastCanvas = document.createElement("canvas");
+                }
+                this.reliefFastCanvas.width = Math.round(view.width * this.reliefFastScale);
+                this.reliefFastCanvas.height = Math.round(view.height * this.reliefFastScale);
+            },
+            // Relief cache key
+            getReliefCacheKey: function(projection, view) {
+                var rot = projection.rotate ? projection.rotate() : [];
+                var scl = projection.scale ? projection.scale() : 1;
+                var tr = projection.translate ? projection.translate() : [];
+                return rot.join(",") + ":" + scl + ":" + tr.join(",") + ":" + view.width + ":" + view.height;
+            },
+            // Relief image loader
+            loadReliefImages: function(callback) {
+                var self = this;
+                var loadedCount = 0;
+                function checkDone() {
+                    loadedCount++;
+                    if (loadedCount === 2 && callback) callback();
+                }
+                if (!self.reliefHi.loaded) {
+                    self.reliefHi.img = new window.Image();
+                    self.reliefHi.img.onload = function() {
+                        var tmp = document.createElement("canvas");
+                        tmp.width = self.reliefHi.img.width;
+                        tmp.height = self.reliefHi.img.height;
+                        var tmpCtx = tmp.getContext("2d");
+                        tmpCtx.drawImage(self.reliefHi.img, 0, 0);
+                        self.reliefHi.data = tmpCtx.getImageData(0, 0, self.reliefHi.img.width, self.reliefHi.img.height).data;
+                        self.reliefHi.loaded = true;
+                        checkDone();
+                    };
+                    self.reliefHi.img.src = "relief.jpg";
+                    // self.reliefHi.img.src = "RSL_10kya.png";
+                } else {
+                    checkDone();
+                }
+                if (!self.reliefLo.loaded) {
+                    self.reliefLo.img = new window.Image();
+                    self.reliefLo.img.onload = function() {
+                        var tmp = document.createElement("canvas");
+                        tmp.width = self.reliefLo.img.width;
+                        tmp.height = self.reliefLo.img.height;
+                        var tmpCtx = tmp.getContext("2d");
+                        tmpCtx.drawImage(self.reliefLo.img, 0, 0);
+                        self.reliefLo.data = tmpCtx.getImageData(0, 0, self.reliefLo.img.width, self.reliefLo.img.height).data;
+                        self.reliefLo.loaded = true;
+                        checkDone();
+                    };
+                    self.reliefLo.img.src = "relief-low.jpg";
+                } else {
+                    checkDone();
+                }
+            },
+            // Relief draw method
+            drawRelief: function(view, projection) {
+                var relief = this.useReliefLo ? this.reliefLo : this.reliefHi;
+                if (!relief.loaded || !relief.data) return;
+                var ctx = this.reliefCanvas.getContext("2d");
+                ctx.clearRect(0, 0, view.width, view.height);
+                var cacheKey = this.getReliefCacheKey(projection, view);
+                if (!this.useReliefLo) {
+                    var cached = this.reliefCache[cacheKey];
+                    if (cached && cached.width === view.width && cached.height === view.height) {
+                        ctx.putImageData(cached, 0, 0);
+                        return;
+                    }
+                }
+                if (this.useReliefLo) {
+                    var fastW = this.reliefFastCanvas.width;
+                    var fastH = this.reliefFastCanvas.height;
+                    var fastCtx = this.reliefFastCanvas.getContext("2d");
+                    var outImg = fastCtx.createImageData(fastW, fastH);
+                    for (var y = 0; y < fastH; y++) {
+                        for (var x = 0; x < fastW; x++) {
+                            var sx = x / fastW * view.width;
+                            var sy = y / fastH * view.height;
+                            var lonlat = projection.invert([sx, sy]);
+                            if (!lonlat) continue;
+                            var lon = lonlat[0], lat = lonlat[1];
+                            var ix = Math.round((lon + 180) / 360 * (relief.img.width - 1));
+                            var iy = Math.round((90 - lat) / 180 * (relief.img.height - 1));
+                            if (ix < 0 || ix >= relief.img.width || iy < 0 || iy >= relief.img.height) continue;
+                            var idx = (iy * relief.img.width + ix) * 4;
+                            var oidx = (y * fastW + x) * 4;
+                            outImg.data[oidx] = relief.data[idx];
+                            outImg.data[oidx+1] = relief.data[idx+1];
+                            outImg.data[oidx+2] = relief.data[idx+2];
+                            outImg.data[oidx+3] = Math.round(relief.data[idx+3] * 0.7);
+                        }
+                    }
+                    fastCtx.putImageData(outImg, 0, 0);
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.drawImage(this.reliefFastCanvas, 0, 0, view.width, view.height);
+                } else {
+                    var outImg = ctx.createImageData(view.width, view.height);
+                    for (var y = 0; y < view.height; y++) {
+                        for (var x = 0; x < view.width; x++) {
+                            var lonlat = projection.invert([x, y]);
+                            if (!lonlat) continue;
+                            var lon = lonlat[0], lat = lonlat[1];
+                            var ix = Math.round((lon + 180) / 360 * (relief.img.width - 1));
+                            var iy = Math.round((90 - lat) / 180 * (relief.img.height - 1));
+                            if (ix < 0 || ix >= relief.img.width || iy < 0 || iy >= relief.img.height) continue;
+                            var idx = (iy * relief.img.width + ix) * 4;
+                            var oidx = (y * view.width + x) * 4;
+                            outImg.data[oidx] = relief.data[idx];
+                            outImg.data[oidx+1] = relief.data[idx+1];
+                            outImg.data[oidx+2] = relief.data[idx+2];
+                            outImg.data[oidx+3] = Math.round(relief.data[idx+3] * 0.7);
+                        }
+                    }
+                    ctx.putImageData(outImg, 0, 0);
+                    this.reliefCache[cacheKey] = outImg;
+                }
+            },
+            clearReliefCache: function() {
+                this.reliefCache = {};
+            },
             /**
              * This globe's current D3 projection.
              */
@@ -165,7 +311,7 @@ var globes = function() {
              * @param mapSvg the primary map SVG container.
              * @param foregroundSvg the foreground SVG container.
              */
-            defineMap: function(mapSvg, foregroundSvg) {
+            defineMap: function(mapSvg, foregroundSvg, view) {
                 var path = d3.geo.path().projection(this.projection);
                 var defs = mapSvg.append("defs");
                 defs.append("path")
@@ -190,6 +336,8 @@ var globes = function() {
                 foregroundSvg.append("use")
                     .attr("xlink:href", "#sphere")
                     .attr("class", "foreground-sphere");
+                // Initialize relief canvas for this globe
+                if (view) this.initReliefCanvas(view);
             }
         };
     }

@@ -79,8 +79,8 @@
     var globeAgent = newAgent();     // the model of the globe
     var gridAgent = newAgent();      // the grid of weather data
     var rendererAgent = newAgent();  // the globe SVG renderer
-    // var fieldAgent = newAgent();     // the interpolated wind vector field
-    // var animatorAgent = newAgent();  // the wind animator
+    var fieldAgent = newAgent();     // the interpolated wind vector field
+    var animatorAgent = newAgent();  // the wind animator
     var overlayAgent = newAgent();   // color overlay over the animation
 
     /**
@@ -277,7 +277,7 @@
         }
     }
 
-        function buildRenderer(mesh, globe) {
+    function buildRenderer(mesh, globe) {
         if (!mesh || !globe) return null;
 
         report.status("Rendering Globe...");
@@ -294,158 +294,17 @@
         µ.removeChildren(d3.select("#map").node());
         µ.removeChildren(d3.select("#foreground").node());
 
-        // Viet added the custom relief layer because wind and other was removed
-        var reliefHi = { img: null, data: null, loaded: false };
-        var reliefLo = { img: null, data: null, loaded: false };
-        var useReliefLo = false;
-        // For fast rendering: offscreen canvas for low-res relief
-        var reliefFastScale = 0.25; // 0.25 = 1/4 res, adjust for quality/speed
-        var reliefFastCanvas = document.createElement("canvas");
-        reliefFastCanvas.width = Math.round(view.width * reliefFastScale);
-        reliefFastCanvas.height = Math.round(view.height * reliefFastScale);
+        // Relief overlay now encapsulated in globe object
 
-        // Relief overlay cache using stringified projection state as key
-        var reliefCache = {};
-        function getProjectionCacheKey(projection) {
-            // Use rotation, scale, and translate as cache key
-            var rot = projection.rotate ? projection.rotate() : [];
-            var scl = projection.scale ? projection.scale() : 1;
-            var tr = projection.translate ? projection.translate() : [];
-            return rot.join(",") + ":" + scl + ":" + tr.join(",") + ":" + view.width + ":" + view.height;
-        }
+            // Create new map svg elements.
+        globe.defineMap(d3.select("#map"), d3.select("#foreground"), view);
+        globe.initReliefCanvas(view);
+            
+        // Relief canvas is now globe.reliefCanvas
 
-        // Create new map svg elements.
-        globe.defineMap(d3.select("#map"), d3.select("#foreground"));
-        
-        // Relief canvas overlay
-        var reliefCanvas = document.getElementById("relief-canvas");
-        if (!reliefCanvas) {
-            reliefCanvas = document.createElement("canvas");
-            reliefCanvas.id = "relief-canvas";
-            reliefCanvas.width = view.width;
-            reliefCanvas.height = view.height;
-            reliefCanvas.style.position = "absolute";
-            reliefCanvas.style.left = "0";
-            reliefCanvas.style.top = "0";
-            reliefCanvas.style.pointerEvents = "none";
-            reliefCanvas.style.zIndex = 1;
-            var display = document.getElementById("display");
-            if (display) {
-                display.insertBefore(reliefCanvas, display.firstChild);
-            } else {
-                document.body.appendChild(reliefCanvas);
-            }
-        } else {
-            reliefCanvas.width = view.width;
-            reliefCanvas.height = view.height;
-        }
+        // Relief image loading now globe.loadReliefImages
 
-        function loadReliefImages(callback) {
-            var loadedCount = 0;
-            function checkDone() {
-                loadedCount++;
-                if (loadedCount === 2 && callback) callback();
-            }
-            // Hi-res
-            if (!reliefHi.loaded) {
-                reliefHi.img = new window.Image();
-                reliefHi.img.onload = function() {
-                    var tmp = document.createElement("canvas");
-                    tmp.width = reliefHi.img.width;
-                    tmp.height = reliefHi.img.height;
-                    var tmpCtx = tmp.getContext("2d");
-                    tmpCtx.drawImage(reliefHi.img, 0, 0);
-                    reliefHi.data = tmpCtx.getImageData(0, 0, reliefHi.img.width, reliefHi.img.height).data;
-                    reliefHi.loaded = true;
-                    checkDone();
-                };
-                reliefHi.img.src = "relief.jpg";
-            } else {
-                checkDone();
-            }
-            // Lo-res
-            if (!reliefLo.loaded) {
-                reliefLo.img = new window.Image();
-                reliefLo.img.onload = function() {
-                    var tmp = document.createElement("canvas");
-                    tmp.width = reliefLo.img.width;
-                    tmp.height = reliefLo.img.height;
-                    var tmpCtx = tmp.getContext("2d");
-                    tmpCtx.drawImage(reliefLo.img, 0, 0);
-                    reliefLo.data = tmpCtx.getImageData(0, 0, reliefLo.img.width, reliefLo.img.height).data;
-                    reliefLo.loaded = true;
-                    checkDone();
-                };
-                reliefLo.img.src = "relief-low.jpg";
-            } else {
-                checkDone();
-            }
-        }
-
-        function drawRelief() {
-            var relief = useReliefLo ? reliefLo : reliefHi;
-            if (!relief.loaded || !relief.data) return;
-            var ctx = reliefCanvas.getContext("2d");
-            ctx.clearRect(0, 0, view.width, view.height);
-            var projection = globe.projection;
-            var cacheKey = getProjectionCacheKey(projection);
-            if (!useReliefLo) {
-                var cached = reliefCache[cacheKey];
-                if (cached && cached.width === view.width && cached.height === view.height) {
-                    ctx.putImageData(cached, 0, 0);
-                    return;
-                }
-            }
-            if (useReliefLo) {
-                // Fast mode: draw to small offscreen canvas, then upscale
-                var fastW = reliefFastCanvas.width;
-                var fastH = reliefFastCanvas.height;
-                var fastCtx = reliefFastCanvas.getContext("2d");
-                var outImg = fastCtx.createImageData(fastW, fastH);
-                for (var y = 0; y < fastH; y++) {
-                    for (var x = 0; x < fastW; x++) {
-                        var sx = x / fastW * view.width;
-                        var sy = y / fastH * view.height;
-                        var lonlat = projection.invert([sx, sy]);
-                        if (!lonlat) continue;
-                        var lon = lonlat[0], lat = lonlat[1];
-                        var ix = Math.round((lon + 180) / 360 * (relief.img.width - 1));
-                        var iy = Math.round((90 - lat) / 180 * (relief.img.height - 1));
-                        if (ix < 0 || ix >= relief.img.width || iy < 0 || iy >= relief.img.height) continue;
-                        var idx = (iy * relief.img.width + ix) * 4;
-                        var oidx = (y * fastW + x) * 4;
-                        outImg.data[oidx] = relief.data[idx];
-                        outImg.data[oidx+1] = relief.data[idx+1];
-                        outImg.data[oidx+2] = relief.data[idx+2];
-                        outImg.data[oidx+3] = Math.round(relief.data[idx+3] * 0.7);
-                    }
-                }
-                fastCtx.putImageData(outImg, 0, 0);
-                ctx.imageSmoothingEnabled = false;
-                ctx.drawImage(reliefFastCanvas, 0, 0, view.width, view.height);
-            } else {
-                // Full-res mode, cache result
-                var outImg = ctx.createImageData(view.width, view.height);
-                for (var y = 0; y < view.height; y++) {
-                    for (var x = 0; x < view.width; x++) {
-                        var lonlat = projection.invert([x, y]);
-                        if (!lonlat) continue;
-                        var lon = lonlat[0], lat = lonlat[1];
-                        var ix = Math.round((lon + 180) / 360 * (relief.img.width - 1));
-                        var iy = Math.round((90 - lat) / 180 * (relief.img.height - 1));
-                        if (ix < 0 || ix >= relief.img.width || iy < 0 || iy >= relief.img.height) continue;
-                        var idx = (iy * relief.img.width + ix) * 4;
-                        var oidx = (y * view.width + x) * 4;
-                        outImg.data[oidx] = relief.data[idx];
-                        outImg.data[oidx+1] = relief.data[idx+1];
-                        outImg.data[oidx+2] = relief.data[idx+2];
-                        outImg.data[oidx+3] = Math.round(relief.data[idx+3] * 0.7);
-                    }
-                }
-                ctx.putImageData(outImg, 0, 0);
-                reliefCache[cacheKey] = outImg;
-            }
-        }
+        // Relief drawing now globe.drawRelief
 
         
         var path = d3.geo.path().projection(globe.projection).pointRadius(7);
@@ -483,7 +342,7 @@
         var REDRAW_WAIT = 5;  // milliseconds
         var doDraw_throttled = _.throttle(doDraw, REDRAW_WAIT, {leading: false});
 
-        // Relief redraw timer logic
+        // Relief redraw timer logic (use globe.useReliefLo and globe.drawRelief)
         var reliefRedrawTimer = null;
         var reliefRedrawPending = false;
         var RELIEF_FRAME_MS = 60; // ~16 FPS
@@ -492,8 +351,8 @@
                 reliefRedrawPending = true;
                 return;
             }
-            useReliefLo = true;
-            drawRelief();
+            globe.useReliefLo = true;
+            globe.drawRelief(view, globe.projection);
             reliefRedrawTimer = setTimeout(function() {
                 reliefRedrawTimer = null;
                 if (reliefRedrawPending) {
@@ -503,18 +362,9 @@
             }, RELIEF_FRAME_MS);
         }
 
-        // If view size changes, update fast canvas size
-        function updateReliefFastCanvas() {
-            reliefFastCanvas.width = Math.round(view.width * reliefFastScale);
-            reliefFastCanvas.height = Math.round(view.height * reliefFastScale);
-            // Invalidate relief cache on resize
-            reliefCache = {};
-        }
-
         function doDraw() {
             d3.selectAll("path").attr("d", path);
-            // Do NOT set useReliefLo here; it is managed by moveStart/move/moveEnd only
-            drawRelief();
+            globe.drawRelief(view, globe.projection);
             rendererAgent.trigger("redraw");
             doDraw_throttled = _.throttle(doDraw, REDRAW_WAIT, {leading: false});
         }
@@ -524,22 +374,23 @@
         dispatch.listenTo(
             inputController, {
                 moveStart: function() {
-                    // isDragging = true;
                     coastline.datum(mesh.coastLo);
                     lakes.datum(mesh.lakesLo);
                     rendererAgent.trigger("start");
-                    useReliefLo = true;
+                    globe.useReliefLo = true;
                 },
                 move: function() {
-                    useReliefLo = true;
-                    redrawRelief_throttled();
+                    globe.useReliefLo = true;
+                    // overlayAgent.trigger("render"); // trigger update event for overlayAgent
+                    // rendererAgent.trigger("redraw");
+                    // rendererAgent.trigger("update");
                     doDraw_throttled();
+                    redrawRelief_throttled();
                 },
                 moveEnd: function() {
-                    
                     coastline.datum(mesh.coastHi);
                     lakes.datum(mesh.lakesHi);
-                    useReliefLo = false;
+                    globe.useReliefLo = false;
                     doDraw();
                     d3.selectAll("path").attr("d", path);
                     rendererAgent.trigger("render");
@@ -557,7 +408,7 @@
             inputController.globe(globe);
         });
         // updateReliefFastCanvas();
-        loadReliefImages(function() {
+        globe.loadReliefImages(function() {
             doDraw();
         });
 
@@ -574,7 +425,7 @@
         var width = view.width, height = view.height;
         var canvas = d3.select(document.createElement("canvas")).attr("width", width).attr("height", height).node();
         var context = globe.defineMask(canvas.getContext("2d"));
-        context.fillStyle = "rgba(255, 0, 0, 1)";
+        context.fillStyle = "rgba(0, 0, 0, 1)";
         context.fill();
         // d3.select("#display").node().appendChild(canvas);  // make mask visible for debugging
 
@@ -598,92 +449,96 @@
         };
     }
 
-    // function createField(columns, bounds, mask) {
+    function createField(columns, bounds, mask) {
 
-    //     /**
-    //      * @returns {Array} wind vector [u, v, magnitude] at the point (x, y), or [NaN, NaN, null] if wind
-    //      *          is undefined at that point.
-    //      */
-    //     function field(x, y) {
-    //         var column = columns[Math.round(x)];
-    //         return column && column[Math.round(y)] || NULL_WIND_VECTOR;
-    //     }
+        /**
+         * @returns {Array} wind vector [u, v, magnitude] at the point (x, y), or [NaN, NaN, null] if wind
+         *          is undefined at that point.
+         */
+        function field(x, y) {
+            var column = columns[Math.round(x)];
+            return column && column[Math.round(y)] || NULL_WIND_VECTOR;
+        }
 
-    //     /**
-    //      * @returns {boolean} true if the field is valid at the point (x, y)
-    //      */
-    //     field.isDefined = function(x, y) {
-    //         return field(x, y)[2] !== null;
-    //     };
+        /**
+         * @returns {boolean} true if the field is valid at the point (x, y)
+         */
+        field.isDefined = function(x, y) {
+            return field(x, y)[2] !== null;
+        };
 
-    //     /**
-    //      * @returns {boolean} true if the point (x, y) lies inside the outer boundary of the vector field, even if
-    //      *          the vector field has a hole (is undefined) at that point, such as at an island in a field of
-    //      *          ocean currents.
-    //      */
-    //     field.isInsideBoundary = function(x, y) {
-    //         return field(x, y) !== NULL_WIND_VECTOR;
-    //     };
+        /**
+         * @returns {boolean} true if the point (x, y) lies inside the outer boundary of the vector field, even if
+         *          the vector field has a hole (is undefined) at that point, such as at an island in a field of
+         *          ocean currents.
+         */
+        field.isInsideBoundary = function(x, y) {
+            return field(x, y) !== NULL_WIND_VECTOR;
+        };
 
-    //     // Frees the massive "columns" array for GC. Without this, the array is leaked (in Chrome) each time a new
-    //     // field is interpolated because the field closure's context is leaked, for reasons that defy explanation.
-    //     field.release = function() {
-    //         columns = [];
-    //     };
+        // Frees the massive "columns" array for GC. Without this, the array is leaked (in Chrome) each time a new
+        // field is interpolated because the field closure's context is leaked, for reasons that defy explanation.
+        field.release = function() {
+            columns = [];
+        };
 
-    //     field.randomize = function(o) {  // UNDONE: this method is terrible
-    //         var x, y;
-    //         var safetyNet = 0;
-    //         do {
-    //             x = Math.round(_.random(bounds.x, bounds.xMax));
-    //             y = Math.round(_.random(bounds.y, bounds.yMax));
-    //         } while (!field.isDefined(x, y) && safetyNet++ < 30);
-    //         o.x = x;
-    //         o.y = y;
-    //         return o;
-    //     };
+        field.randomize = function(o) {  // UNDONE: this method is terrible
+            var x, y;
+            var safetyNet = 0;
+            do {
+                x = Math.round(_.random(bounds.x, bounds.xMax));
+                y = Math.round(_.random(bounds.y, bounds.yMax));
+            } while (!field.isDefined(x, y) && safetyNet++ < 30);
+            o.x = x;
+            o.y = y;
+            return o;
+        };
 
-    //     field.overlay = mask.imageData;
+        field.overlay = mask.imageData;
 
-    //     return field;
-    // }
+        return field;
+    }
 
     /**
      * Calculate distortion of the wind vector caused by the shape of the projection at point (x, y). The wind
      * vector is modified in place and returned by this function.
      */
-    // function distort(projection, λ, φ, x, y, scale, wind) {
-    //     var u = wind[0] * scale;
-    //     var v = wind[1] * scale;
-    //     var d = µ.distortion(projection, λ, φ, x, y);
+    function distort(projection, λ, φ, x, y, scale, wind) {
+        var u = wind[0] * scale;
+        var v = wind[1] * scale;
+        var d = µ.distortion(projection, λ, φ, x, y);
 
-    //     // Scale distortion vectors by u and v, then add.
-    //     wind[0] = d[0] * u + d[2] * v;
-    //     wind[1] = d[1] * u + d[3] * v;
-    //     return wind;
-    // }
+        // console.log("u: " + u);
+        // console.log("v: " + v);
+        // console.log("d: " + d);
+        // console.log(d[0] * u + d[2] * v);
+        // console.log(d[1] * u + d[3] * v);
 
-    // function interpolateField(globe, grids) {
+        // Scale distortion vectors by u and v, then add.
+        wind[0] = d[0] * u + d[2] * v;
+        wind[1] = d[1] * u + d[3] * v;
+        return wind;
+    }
+
+    // function interpolatePoint(globe, grids) {
     //     if (!globe || !grids) return null;
 
     //     var mask = createMask(globe);
     //     var primaryGrid = grids.primaryGrid;
     //     var overlayGrid = grids.overlayGrid;
 
-    //     log.time("interpolating field");
+    //     log.time("interpolating point");
     //     var d = when.defer(), cancel = this.cancel;
+    //     // point: [x, y] pixel coordinates on the screen
 
     //     var projection = globe.projection;
     //     var bounds = globe.bounds(view);
-    //     // How fast particles move on the screen (arbitrary value chosen for aesthetics).
-    //     var velocityScale = bounds.height * primaryGrid.particles.velocityScale;
 
     //     var columns = [];
     //     var point = [];
     //     var x = bounds.x;
     //     var interpolate = primaryGrid.interpolate;
     //     var overlayInterpolate = overlayGrid.interpolate;
-    //     var hasDistinctOverlay = primaryGrid !== overlayGrid;
     //     var scale = overlayGrid.scale;
 
     //     function interpolateColumn(x) {
@@ -693,15 +548,15 @@
     //                 point[0] = x; point[1] = y;
     //                 var coord = projection.invert(point);
     //                 var color = TRANSPARENT_BLACK;
-    //                 var wind = null;
+    //                 var gia = null;
     //                 if (coord) {
     //                     var λ = coord[0], φ = coord[1];
     //                     if (isFinite(λ)) {
-    //                         wind = interpolate(λ, φ);
+    //                         gia = interpolate(λ, φ);
     //                         var scalar = null;
-    //                         if (wind) {
-    //                             wind = distort(projection, λ, φ, x, y, velocityScale, wind);
-    //                             scalar = wind[2];
+    //                         if (gia) {
+    //                             gia = distort(projection, λ, φ, x, y, velocityScale, gia);
+    //                             scalar = gia[2];
     //                         }
     //                         if (hasDistinctOverlay) {
     //                             scalar = overlayInterpolate(λ, φ);
@@ -711,13 +566,12 @@
     //                         }
     //                     }
     //                 }
-    //                 column[y+1] = column[y] = wind || HOLE_VECTOR;
+    //                 column[y+1] = column[y] = gia || HOLE_VECTOR;
     //                 mask.set(x, y, color).set(x+1, y, color).set(x, y+1, color).set(x+1, y+1, color);
     //             }
     //         }
     //         columns[x+1] = columns[x] = column;
     //     }
-
     //     report.status("");
 
     //     (function batchInterpolate() {
@@ -741,106 +595,201 @@
     //             d.reject(e);
     //         }
     //         report.progress(1);  // 100% complete
-    //         log.timeEnd("interpolating field");
+    //         log.timeEnd("interpolating point");
     //     })();
 
     //     return d.promise;
+
     // }
 
-    // function animate(globe, field, grids) {
-    //     if (!globe || !field || !grids) return;
+    function interpolateField(globe, grids) {
+        if (!globe || !grids) return null;
 
-    //     var cancel = this.cancel;
-    //     var bounds = globe.bounds(view);
-    //     // maxIntensity is the velocity at which particle color intensity is maximum
-    //     var colorStyles = µ.windIntensityColorScale(INTENSITY_SCALE_STEP, grids.primaryGrid.particles.maxIntensity);
-    //     var buckets = colorStyles.map(function() { return []; });
-    //     var particleCount = Math.round(bounds.width * PARTICLE_MULTIPLIER);
-    //     if (µ.isMobile()) {
-    //         particleCount *= PARTICLE_REDUCTION;
-    //     }
-    //     var fadeFillStyle = µ.isFF() ? "rgba(0, 0, 0, 0.95)" : "rgba(0, 0, 0, 0.97)";  // FF Mac alpha behaves oddly
+        var mask = createMask(globe);
+        var primaryGrid = grids.primaryGrid;
+        var overlayGrid = grids.overlayGrid;
 
-    //     log.debug("particle count: " + particleCount);
-    //     var particles = [];
-    //     for (var i = 0; i < particleCount; i++) {
-    //         particles.push(field.randomize({age: _.random(0, MAX_PARTICLE_AGE)}));
-    //     }
+        log.time("interpolating field");
+        var d = when.defer(), cancel = this.cancel;
 
-    //     function evolve() {
-    //         buckets.forEach(function(bucket) { bucket.length = 0; });
-    //         particles.forEach(function(particle) {
-    //             if (particle.age > MAX_PARTICLE_AGE) {
-    //                 field.randomize(particle).age = 0;
-    //             }
-    //             var x = particle.x;
-    //             var y = particle.y;
-    //             var v = field(x, y);  // vector at current position
-    //             var m = v[2];
-    //             if (m === null) {
-    //                 particle.age = MAX_PARTICLE_AGE;  // particle has escaped the grid, never to return...
-    //             }
-    //             else {
-    //                 var xt = x + v[0];
-    //                 var yt = y + v[1];
-    //                 if (field.isDefined(xt, yt)) {
-    //                     // Path from (x,y) to (xt,yt) is visible, so add this particle to the appropriate draw bucket.
-    //                     particle.xt = xt;
-    //                     particle.yt = yt;
-    //                     buckets[colorStyles.indexFor(m)].push(particle);
-    //                 }
-    //                 else {
-    //                     // Particle isn't visible, but it still moves through the field.
-    //                     particle.x = xt;
-    //                     particle.y = yt;
-    //                 }
-    //             }
-    //             particle.age += 1;
-    //         });
-    //     }
+        var projection = globe.projection;
+        var bounds = globe.bounds(view);
+        // How fast particles move on the screen (arbitrary value chosen for aesthetics).
+        var velocityScale = bounds.height * primaryGrid.particles.velocityScale;
 
-    //     var g = d3.select("#animation").node().getContext("2d");
-    //     g.lineWidth = PARTICLE_LINE_WIDTH;
-    //     g.fillStyle = fadeFillStyle;
+        var columns = [];
+        var point = [];
+        var x = bounds.x;
+        var interpolate = primaryGrid.interpolate;
+        var overlayInterpolate = overlayGrid.interpolate;
+        var hasDistinctOverlay = (primaryGrid !== overlayGrid);
+        var scale = overlayGrid.scale;
 
-    //     function draw() {
-    //         // Fade existing particle trails.
-    //         var prev = g.globalCompositeOperation;
-    //         g.globalCompositeOperation = "destination-in";
-    //         g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-    //         g.globalCompositeOperation = prev;
+        function interpolateColumn(x) {
+            var column = [];
+            for (var y = bounds.y; y <= bounds.yMax; y += 2) {
+                if (mask.isVisible(x, y)) {
+                    point[0] = x; point[1] = y;
+                    var coord = projection.invert(point);
+                    var color = TRANSPARENT_BLACK;
+                    var wind = null;
+                    var scalar = null;
+                    if (coord) {
+                        var λ = coord[0], φ = coord[1];
+                        if (isFinite(λ)) {
+                            if (primaryGrid.type !== "gia") {
+                                wind = interpolate(λ, φ);
+                                
+                                if (wind) {
+                                    wind = distort(projection, λ, φ, x, y, velocityScale, wind);
+                                    scalar = wind[2];
+                                }
+                                if (hasDistinctOverlay) {
+                                    scalar = overlayInterpolate(λ, φ);
+                                }
+                                if (µ.isValue(scalar)) {
+                                    color = scale.gradient(scalar, OVERLAY_ALPHA);
+                                }
+                            } else {
+                                scalar = overlayInterpolate(λ, φ);
+                                color = scale.gradient(scalar, OVERLAY_ALPHA);
+                            }
+                        }
+                    }
+                    if (µ.isValue(wind)) {
+                        column[y+1] = column[y] = wind || HOLE_VECTOR;
+                    } else {
+                        column[y+1] = column[y] = scalar;
+                    }
+                    mask.set(x, y, color).set(x+1, y, color).set(x, y+1, color).set(x+1, y+1, color);
+                }
+            }
+            columns[x+1] = columns[x] = column;
+        }
 
-    //         // Draw new particle trails.
-    //         buckets.forEach(function(bucket, i) {
-    //             if (bucket.length > 0) {
-    //                 g.beginPath();
-    //                 g.strokeStyle = colorStyles[i];
-    //                 bucket.forEach(function(particle) {
-    //                     g.moveTo(particle.x, particle.y);
-    //                     g.lineTo(particle.xt, particle.yt);
-    //                     particle.x = particle.xt;
-    //                     particle.y = particle.yt;
-    //                 });
-    //                 g.stroke();
-    //             }
-    //         });
-    //     }
+        report.status("");
 
-    //     (function frame() {
-    //         try {
-    //             if (cancel.requested) {
-    //                 field.release();
-    //                 return;
-    //             }
-    //             evolve();
-    //             draw();
-    //             setTimeout(frame, FRAME_RATE);
-    //         }
-    //         catch (e) {
-    //             report.error(e);
-    //         }
-    //     })();
-    // }
+        (function batchInterpolate() {
+            try {
+                if (!cancel.requested) {
+                    var start = Date.now();
+                    while (x < bounds.xMax) {
+                        interpolateColumn(x);
+                        x += 2;
+                        if ((Date.now() - start) > MAX_TASK_TIME) {
+                            // Interpolation is taking too long. Schedule the next batch for later and yield.
+                            report.progress((x - bounds.x) / (bounds.xMax - bounds.x));
+                            setTimeout(batchInterpolate, MIN_SLEEP_TIME);
+                            return;
+                        }
+                    }
+                }
+                d.resolve(createField(columns, bounds, mask));
+            }
+            catch (e) {
+                d.reject(e);
+            }
+            report.progress(1);  // 100% complete
+            log.timeEnd("interpolating field");
+        })();
+
+        return d.promise;
+    }
+
+    function animate(globe, field, grids) {
+        if (!globe || !field || !grids) return;
+
+        var cancel = this.cancel;
+        var bounds = globe.bounds(view);
+        // maxIntensity is the velocity at which particle color intensity is maximum
+        var colorStyles = µ.windIntensityColorScale(INTENSITY_SCALE_STEP, grids.primaryGrid.particles.maxIntensity);
+        var buckets = colorStyles.map(function() { return []; });
+        var particleCount = Math.round(bounds.width * PARTICLE_MULTIPLIER);
+        if (µ.isMobile()) {
+            particleCount *= PARTICLE_REDUCTION;
+        }
+        var fadeFillStyle = µ.isFF() ? "rgba(0, 0, 0, 0.95)" : "rgba(0, 0, 0, 0.97)";  // FF Mac alpha behaves oddly
+
+        log.debug("particle count: " + particleCount);
+        var particles = [];
+        for (var i = 0; i < particleCount; i++) {
+            particles.push(field.randomize({age: _.random(0, MAX_PARTICLE_AGE)}));
+        }
+
+        function evolve() {
+            buckets.forEach(function(bucket) { bucket.length = 0; });
+            particles.forEach(function(particle) {
+                if (particle.age > MAX_PARTICLE_AGE) {
+                    field.randomize(particle).age = 0;
+                }
+                var x = particle.x;
+                var y = particle.y;
+                var v = field(x, y);  // vector at current position
+                var m = v[2];
+                if (m === null) {
+                    particle.age = MAX_PARTICLE_AGE;  // particle has escaped the grid, never to return...
+                }
+                else {
+                    var xt = x + v[0];
+                    var yt = y + v[1];
+                    if (field.isDefined(xt, yt)) {
+                        // Path from (x,y) to (xt,yt) is visible, so add this particle to the appropriate draw bucket.
+                        particle.xt = xt;
+                        particle.yt = yt;
+                        buckets[colorStyles.indexFor(m)].push(particle);
+                    }
+                    else {
+                        // Particle isn't visible, but it still moves through the field.
+                        particle.x = xt;
+                        particle.y = yt;
+                    }
+                }
+                particle.age += 1;
+            });
+        }
+
+        var g = d3.select("#animation").node().getContext("2d");
+        g.lineWidth = PARTICLE_LINE_WIDTH;
+        g.fillStyle = fadeFillStyle;
+
+        function draw() {
+            // Fade existing particle trails.
+            var prev = g.globalCompositeOperation;
+            g.globalCompositeOperation = "destination-in";
+            g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            g.globalCompositeOperation = prev;
+
+            // Draw new particle trails.
+            buckets.forEach(function(bucket, i) {
+                if (bucket.length > 0) {
+                    g.beginPath();
+                    g.strokeStyle = colorStyles[i];
+                    bucket.forEach(function(particle) {
+                        g.moveTo(particle.x, particle.y);
+                        g.lineTo(particle.xt, particle.yt);
+                        particle.x = particle.xt;
+                        particle.y = particle.yt;
+                    });
+                    g.stroke();
+                }
+            });
+        }
+
+        (function frame() {
+            try {
+                if (cancel.requested) {
+                    field.release();
+                    return;
+                }
+                evolve();
+                draw();
+                setTimeout(frame, FRAME_RATE);
+            }
+            catch (e) {
+                report.error(e);
+            }
+        })();
+    }
 
     function drawGridPoints(ctx, grid, globe) {
         if (!grid || !globe || !configuration.get("showGridPoints")) return;
@@ -859,57 +808,68 @@
         });
     }
 
-    // function drawOverlay(field, overlayType) {
-    //     if (!field) return;
+    function drawOverlay(field, overlayType) {
+        if (!field) return;
 
-    //     var ctx = d3.select("#overlay").node().getContext("2d"), grid = (gridAgent.value() || {}).overlayGrid;
+        var ctx = d3.select("#overlay").node().getContext("2d"), grid = (gridAgent.value() || {}).overlayGrid;
 
-    //     µ.clearCanvas(d3.select("#overlay").node());
-    //     µ.clearCanvas(d3.select("#scale").node());
-    //     if (overlayType) {
-    //         if (overlayType !== "off") {
-    //             ctx.putImageData(field.overlay, 0, 0);
-    //         }
-    //         drawGridPoints(ctx, grid, globeAgent.value());
-    //     }
+        µ.clearCanvas(d3.select("#overlay").node());
+        µ.clearCanvas(d3.select("#scale").node());
+        if (overlayType) {
+            if (overlayType !== "off") {
+                ctx.putImageData(field.overlay, 0, 0);
+            }
+            drawGridPoints(ctx, grid, globeAgent.value());
+        }
 
-    //     if (grid) {
-    //         // Draw color bar for reference.
-    //         var colorBar = d3.select("#scale"), scale = grid.scale, bounds = scale.bounds;
-    //         var c = colorBar.node(), g = c.getContext("2d"), n = c.width - 1;
-    //         for (var i = 0; i <= n; i++) {
-    //             var rgb = scale.gradient(µ.spread(i / n, bounds[0], bounds[1]), 1);
-    //             g.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
-    //             g.fillRect(i, 0, 1, c.height);
-    //         }
+        if (grid) {
+            // Draw color bar for reference.
+            var colorBar = d3.select("#scale"), scale = grid.scale, bounds = scale.bounds;
+            var c = colorBar.node(), g = c.getContext("2d"), n = c.width - 1;
+            for (var i = 0; i <= n; i++) {
+                var rgb = scale.gradient(µ.spread(i / n, bounds[0], bounds[1]), 1);
+                g.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
+                g.fillRect(i, 0, 1, c.height);
+            }
 
-    //         // Show tooltip on hover.
-    //         colorBar.on("mousemove", function() {
-    //             var x = d3.mouse(this)[0];
-    //             var pct = µ.clamp((Math.round(x) - 2) / (n - 2), 0, 1);
-    //             var value = µ.spread(pct, bounds[0], bounds[1]);
-    //             var elementId = grid.type === "wind" ? "#location-wind-units" : "#location-value-units";
-    //             var units = createUnitToggle(elementId, grid).value();
-    //             colorBar.attr("title", µ.formatScalar(value, units) + " " + units.label);
-    //         });
-    //     }
-    // }
+            // Show tooltip on hover.
+            colorBar.on("mousemove", function() {
+                var x = d3.mouse(this)[0];
+                var pct = µ.clamp((Math.round(x) - 2) / (n - 2), 0, 1);
+                var value = µ.spread(pct, bounds[0], bounds[1]);
+                var elementId = grid.type === "wind" ? "#location-wind-units" : "#location-value-units";
+                var units = createUnitToggle(elementId, grid).value();
+                colorBar.attr("title", µ.formatScalar(value, units) + " " + units.label);
+            });
+        }
+    }
 
     /**
      * Extract the date the grids are valid, or the current date if no grid is available.
      * UNDONE: if the grids hold unloaded products, then the date can be extracted from them.
      *         This function would simplify nicely.
      */
+    // function validityDate(grids) {
+    //     // When the active layer is considered "current", use its time as now, otherwise use current time as
+    //     // now (but rounded down to the nearest three-hour block).
+    //     var THREE_HOURS = 3 * HOUR;
+    //     var now = grids ? grids.primaryGrid.date.getTime() : Math.floor(Date.now() / THREE_HOURS) * THREE_HOURS;
+    //     var parts = configuration.get("date").split("/");  // yyyy/mm/dd or "current"
+    //     var hhmm = configuration.get("hour");
+    //     return parts.length > 1 ?
+    //         Date.UTC(+parts[0], parts[1] - 1, +parts[2], +hhmm.substring(0, 2)) :
+    //         parts[0] === "current" ? now : null;
+    // }
     function validityDate(grids) {
-        // When the active layer is considered "current", use its time as now, otherwise use current time as
-        // now (but rounded down to the nearest three-hour block).
         var THREE_HOURS = 3 * HOUR;
-        var now = grids ? grids.primaryGrid.date.getTime() : Math.floor(Date.now() / THREE_HOURS) * THREE_HOURS;
+        // Use the grid's date if available, otherwise use the current time rounded down to the nearest 3-hour block.
+        var now = Math.floor(Date.now() / THREE_HOURS) * THREE_HOURS;
+        var gridDate = grids && grids.primaryGrid && grids.primaryGrid.date ? grids.primaryGrid.date.getTime() : now;
         var parts = configuration.get("date").split("/");  // yyyy/mm/dd or "current"
         var hhmm = configuration.get("hour");
-        return parts.length > 1 ?
-            Date.UTC(+parts[0], parts[1] - 1, +parts[2], +hhmm.substring(0, 2)) :
-            parts[0] === "current" ? now : null;
+        return parts.length > 1
+            ? Date.UTC(+parts[0], parts[1] - 1, +parts[2], +hhmm.substring(0, 2))
+            : parts[0] === "current" ? gridDate : now;
     }
 
     /**
@@ -987,67 +947,69 @@
 
     // Stores the point and coordinate of the currently visible location. This is used to update the location
     // details when the field changes.
-    // var activeLocation = {};
+    var activeLocation = {};
 
     /**
      * Display a local data callout at the given [x, y] point and its corresponding [lon, lat] coordinates.
      * The location may not be valid, in which case no callout is displayed. Display location data for both
      * the primary grid and overlay grid, performing interpolation when necessary.
      */
-    // function showLocationDetails(point, coord) {
-    //     point = point || [];
-    //     coord = coord || [];
-    //     // var grids = gridAgent.value(), field = fieldAgent.value(), λ = coord[0], φ = coord[1];
-    //     var grids = gridAgent.value(), λ = coord[0], φ = coord[1];
-    //     if (!field || !field.isInsideBoundary(point[0], point[1])) {
-    //         return;
-    //     }
+    function showLocationDetails(point, coord) {
+        point = point || [];
+        coord = coord || [];
+        var grids = gridAgent.value(), field = fieldAgent.value(), λ = coord[0], φ = coord[1];
+        var grids = gridAgent.value(), λ = coord[0], φ = coord[1];
+        if (!field || !field.isInsideBoundary(point[0], point[1])) {
+            return;
+        }
 
-    //     clearLocationDetails(false);  // clean the slate
-    //     activeLocation = {point: point, coord: coord};  // remember where the current location is
+        clearLocationDetails(false);  // clean the slate
+        activeLocation = {point: point, coord: coord};  // remember where the current location is
 
-    //     if (_.isFinite(λ) && _.isFinite(φ)) {
-    //         d3.select("#location-coord").text(µ.formatCoordinates(λ, φ));
-    //         d3.select("#location-close").classed("invisible", false);
-    //     }
+        if (_.isFinite(λ) && _.isFinite(φ)) {
+            d3.select("#location-coord").text(µ.formatCoordinates(λ, φ));
+            d3.select("#location-close").classed("invisible", false);
+        }
 
-    //     if (field.isDefined(point[0], point[1]) && grids) {
-    //         var wind = grids.primaryGrid.interpolate(λ, φ);
-    //         if (µ.isValue(wind)) {
-    //             showWindAtLocation(wind, grids.primaryGrid);
-    //         }
-    //         if (grids.overlayGrid !== grids.primaryGrid) {
-    //             var value = grids.overlayGrid.interpolate(λ, φ);
-    //             if (µ.isValue(value)) {
-    //                 showOverlayValueAtLocation(value, grids.overlayGrid);
-    //             }
-    //         }
-    //     }
-    // }
+        if (field.isDefined(point[0], point[1]) && grids) {
+            if (grids.primaryGrid.type !== "gia") {
+                var wind = grids.primaryGrid.interpolate(λ, φ);
+                if (µ.isValue(wind)) {
+                    showWindAtLocation(wind, grids.primaryGrid);
+                }
+            }
+            if (grids.overlayGrid !== grids.primaryGrid || grids.primaryGrid.type === "gia") {
+                var value = grids.overlayGrid.interpolate(λ, φ);
+                if (µ.isValue(value)) {
+                    showOverlayValueAtLocation(value, grids.overlayGrid);
+                }
+            }
+        }
+    }
 
-    // function updateLocationDetails() {
-    //     showLocationDetails(activeLocation.point, activeLocation.coord);
-    // }
+    function updateLocationDetails() {
+        showLocationDetails(activeLocation.point, activeLocation.coord);
+    }
 
-    // function clearLocationDetails(clearEverything) {
-    //     d3.select("#location-coord").text("");
-    //     d3.select("#location-close").classed("invisible", true);
-    //     d3.select("#location-wind").text("");
-    //     d3.select("#location-wind-units").text("");
-    //     d3.select("#location-value").text("");
-    //     d3.select("#location-value-units").text("");
-    //     if (clearEverything) {
-    //         activeLocation = {};
-    //         d3.select(".location-mark").remove();
-    //     }
-    // }
+    function clearLocationDetails(clearEverything) {
+        d3.select("#location-coord").text("");
+        d3.select("#location-close").classed("invisible", true);
+        d3.select("#location-wind").text("");
+        d3.select("#location-wind-units").text("");
+        d3.select("#location-value").text("");
+        d3.select("#location-value-units").text("");
+        if (clearEverything) {
+            activeLocation = {};
+            d3.select(".location-mark").remove();
+        }
+    }
 
-    // function stopCurrentAnimation(alsoClearCanvas) {
-    //     // animatorAgent.cancel();
-    //     if (alsoClearCanvas) {
-    //         µ.clearCanvas(d3.select("#animation").node());
-    //     }
-    // }
+    function stopCurrentAnimation(alsoClearCanvas) {
+        animatorAgent.cancel();
+        if (alsoClearCanvas) {
+            µ.clearCanvas(d3.select("#animation").node());
+        }
+    }
 
     /**
      * Registers a click event handler for the specified DOM element which modifies the configuration to have
@@ -1176,45 +1138,46 @@
         rendererAgent.listenTo(meshAgent, "update", startRendering);
         rendererAgent.listenTo(globeAgent, "update", startRendering);
 
-        // function startInterpolation() {
-        //     fieldAgent.submit(interpolateField, globeAgent.value(), gridAgent.value());
-        // }
-        // function cancelInterpolation() {
-        //     fieldAgent.cancel();
-        // }
-        // fieldAgent.listenTo(gridAgent, "update", startInterpolation);
-        // fieldAgent.listenTo(rendererAgent, "render", startInterpolation);
-        // fieldAgent.listenTo(rendererAgent, "start", cancelInterpolation);
-        // fieldAgent.listenTo(rendererAgent, "redraw", cancelInterpolation);
+        function startInterpolation() {
+            fieldAgent.submit(interpolateField, globeAgent.value(), gridAgent.value());
+        }
+        function cancelInterpolation() {
+            fieldAgent.cancel();
+        }
+        fieldAgent.listenTo(gridAgent, "update", startInterpolation);
+        fieldAgent.listenTo(rendererAgent, "render", startInterpolation);
+        fieldAgent.listenTo(rendererAgent, "start", cancelInterpolation);
+        fieldAgent.listenTo(rendererAgent, "redraw", cancelInterpolation);
 
         // animatorAgent.listenTo(fieldAgent, "update", function(field) {
         //     animatorAgent.submit(animate, globeAgent.value(), field, gridAgent.value());
         // });
-        // animatorAgent.listenTo(rendererAgent, "start", stopCurrentAnimation.bind(null, true));
-        // animatorAgent.listenTo(gridAgent, "submit", stopCurrentAnimation.bind(null, false));
-        // animatorAgent.listenTo(fieldAgent, "submit", stopCurrentAnimation.bind(null, false));
+        animatorAgent.listenTo(rendererAgent, "start", stopCurrentAnimation.bind(null, true));
+        animatorAgent.listenTo(gridAgent, "submit", stopCurrentAnimation.bind(null, false));
+        animatorAgent.listenTo(fieldAgent, "submit", stopCurrentAnimation.bind(null, false));
 
-        // overlayAgent.listenTo(fieldAgent, "update", function() {
-        //     overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
-        // });
-        // overlayAgent.listenTo(rendererAgent, "start", function() {
-        //     overlayAgent.submit(drawOverlay, fieldAgent.value(), null);
-        // });
-        // overlayAgent.listenTo(configuration, "change", function() {
-        //     var changed = _.keys(configuration.changedAttributes())
-        //     // if only overlay relevant flags have changed...
-        //     if (_.intersection(changed, ["overlayType", "showGridPoints"]).length > 0) {
-        //         overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
-        //     }
-        // });
+        overlayAgent.listenTo(fieldAgent, "update", function() {
+            overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
+        });
+        overlayAgent.listenTo(rendererAgent, "start", function() {
+            overlayAgent.submit(drawOverlay, fieldAgent.value(), null);
+        });
+        overlayAgent.listenTo(configuration, "change", function() {
+            var changed = _.keys(configuration.changedAttributes())
+            // if only overlay relevant flags have changed...
+            if (_.intersection(changed, ["overlayType", "showGridPoints"]).length > 0) {
+                overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
+            }
+        });
 
         // Add event handlers for showing, updating, and removing location details.
-        // inputController.on("click", showLocationDetails);
-        // fieldAgent.on("update", updateLocationDetails);
-        // d3.select("#location-close").on("click", _.partial(clearLocationDetails, true));
+        inputController.on("click", showLocationDetails);
+        fieldAgent.on("update", updateLocationDetails);
+        d3.select("#location-close").on("click", _.partial(clearLocationDetails, true));
 
         // Modify menu depending on what mode we're in.
         configuration.on("change:param", function(context, mode) {
+            d3.selectAll(".gia-mode").classed("invisible", mode !== "gia");
             d3.selectAll(".ocean-mode").classed("invisible", mode !== "ocean");
             d3.selectAll(".wind-mode").classed("invisible", mode !== "wind");
             switch (mode) {
@@ -1230,6 +1193,12 @@
                     d3.select("#nav-forward").attr("title", "+5 Days");
                     d3.select("#nav-forward-more").attr("title", "+1 Month");
                     break;
+                case "gia":
+                    d3.select("#nav-backward-more").attr("title", "-10Kya");
+                    d3.select("#nav-backward").attr("title", "-1Kya");
+                    d3.select("#nav-forward").attr("title", "+1Kya");
+                    d3.select("#nav-forward-more").attr("title", "+10Kya");
+                    break;
             }
         });
 
@@ -1242,6 +1211,7 @@
         configuration.on("change:param", function(x, param) {
             d3.select("#wind-mode-enable").classed("highlighted", param === "wind");
         });
+
         d3.select("#ocean-mode-enable").on("click", function() {
             if (configuration.get("param") !== "ocean") {
                 // When switching between modes, there may be no associated data for the current date. So we need
@@ -1264,6 +1234,18 @@
         });
         configuration.on("change:param", function(x, param) {
             d3.select("#ocean-mode-enable").classed("highlighted", param === "ocean");
+        });
+
+        d3.select("#gia-mode-enable").on("click", function() {
+            if (configuration.get("param") !== "gia") {
+                var gia = {param: "gia", surface: "surface", level: "currents", overlayType: "default"};
+                var attr = _.clone(configuration.attributes);
+                configuration.save(gia);
+                stopCurrentAnimation(true);
+            }
+        });
+        configuration.on("change:param", function(x, param) {
+            d3.select("#gia-mode-enable").classed("highlighted", param === "gia");
         });
 
         // Add logic to disable buttons that are incompatible with each other.
@@ -1303,6 +1285,8 @@
             bindButtonToConfiguration("#overlay-" + type, {overlayType: type});
         });
         bindButtonToConfiguration("#overlay-wind", {param: "wind", overlayType: "default"});
+        bindButtonToConfiguration("#overlay-gia", {param: "gia", overlayType: "default"});
+        bindButtonToConfiguration("#overlay-gia-off", {overlayType: "off"});
         bindButtonToConfiguration("#overlay-ocean-off", {overlayType: "off"});
         bindButtonToConfiguration("#overlay-currents", {overlayType: "default"});
 

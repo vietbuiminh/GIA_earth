@@ -77,7 +77,7 @@ body {
     cursor: default;
 }
 
-#map, #animation, #overlay, #foreground {
+#map, #animation, #overlay, #foreground, #relief-canvas{
     position: absolute;
     top: 0;
     left: 0;
@@ -232,10 +232,11 @@ body {
 
 .foreground-sphere {
     stroke: #000005;
-    stroke-width: 4.0;
+    stroke-width: 5.5;
     fill: none;
     -moz-user-select: none;  /* Oddly, Win FF sometimes selects this SVG element. Disable. */
     user-select: none;
+    transform: translate(1.3px, 1px);
 }
 
 .location-mark {

@@ -9,6 +9,7 @@
 var products = function() {
     "use strict";
 
+    var GIA_PATH = "/data/gia";
     var WEATHER_PATH = "/data/weather";
     var OSCAR_PATH = "/data/oscar";
     var catalogs = {
@@ -32,6 +33,14 @@ var products = function() {
                 });
             }
         }, overrides);
+    }
+
+    function giaPath(attr) {
+        return [GIA_PATH, "gia-500ya.json"].join("/");
+    }
+    function giaYear(attr) {
+        var now = new Date();
+        return new Date(now.setFullYear(now.getFullYear() - 500));
     }
 
     /**
@@ -108,6 +117,47 @@ var products = function() {
     }
 
     var FACTORIES = {
+        "gia": {
+            matches: _.matches({param: "gia"}),
+            create: function(attr) {
+                return buildProduct({
+                    field: "scalar",
+                    type: "gia",
+                    description: localize({
+                        name: {en: "Relative Sea Level Change 500Kya", ja: "相対海面変化 500Kya"},
+                        qualifier: {en: " @ Surface", ja: " @ 地上"}
+                    }),
+                    paths: [giaPath(attr)],
+                    date: giaYear(attr),
+                    builder: function(file) {
+                        var data = file[0].data;
+                        return {
+                            header: file[0].header,
+                            interpolate: bilinearInterpolateScalar,
+                            data: function(i) {
+                                return data[i];
+                            }
+                        }
+                    },
+                    units: [
+                        {label: "m",  conversion: function(x) { return x; },            precision: 1},
+                        {label: "cm", conversion: function(x) { return x * 100; },      precision: 0},
+                        {label: "mm", conversion: function(x) { return x * 1000; },     precision: 0}
+                    ],
+                    scale: {
+                        bounds: [-3, 8],
+                        gradient: µ.segmentedColorScale([
+                            [-3, [0, 0, 4]],
+                            [0, [72, 11, 119]],
+                            [2, [182, 54, 121]],
+                            [4, [251, 140, 60]],
+                            [8, [252, 253, 191]]
+                        ])
+                    },
+                    particles: {velocityScale: 1/60000, maxIntensity:  1}
+                });
+            }
+        },
 
         "wind": {
             matches: _.matches({param: "wind"}),
@@ -565,7 +615,8 @@ var products = function() {
     function bilinearInterpolateScalar(x, y, g00, g10, g01, g11) {
         var rx = (1 - x);
         var ry = (1 - y);
-        return g00 * rx * ry + g10 * x * ry + g01 * rx * y + g11 * x * y;
+        var a = rx * ry,  b = x * ry,  c = rx * y,  d = x * y;
+        return g00 * a + g10 * b + g01 * c + g11 * d;
     }
 
     function bilinearInterpolateVector(x, y, g00, g10, g01, g11) {
@@ -606,14 +657,29 @@ var products = function() {
      */
     function buildGrid(builder) {
         // var builder = createBuilder(data);
-
+        var header = builder.header;
+        if (!header.refTime) {
+            var now = new Date();
+            now.setFullYear(header.timeValue * 1000);
+            header.refTime = now.toISOString();
+        }
+        if (!header.forecastTime) {
+            header.forecastTime = 0;
+        }
+        console.log("buildGrid");
+        console.log(builder.header);
         var header = builder.header;
         var λ0 = header.lo1, φ0 = header.la1;  // the grid's origin (e.g., 0.0E, 90.0N)
         var Δλ = header.dx, Δφ = header.dy;    // distance between grid points (e.g., 2.5 deg lon, 2.5 deg lat)
         var ni = header.nx, nj = header.ny;    // number of grid points W-E and N-S (e.g., 144 x 73)
         var date = new Date(header.refTime);
         date.setHours(date.getHours() + header.forecastTime);
-
+        console.log("λ0: " + λ0);
+        console.log("φ0: " + φ0);
+        console.log("Δλ: " + Δλ);
+        console.log("Δφ: " + Δφ);
+        console.log("ni: " + ni);
+        console.log("nj: " + nj);
         // Scan mode 0 assumed. Longitude increases from λ0, and latitude decreases from φ0.
         // http://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_table3-4.shtml
         var grid = [], p = 0;
@@ -631,8 +697,10 @@ var products = function() {
         }
 
         function interpolate(λ, φ) {
-            var i = µ.floorMod(λ - λ0, 360) / Δλ;  // calculate longitude index in wrapped range [0, 360)
+            var i = µ.floorMod(λ - λ0, 360) / (Δλ);  // calculate longitude index in wrapped range [0, 360)
             var j = (φ0 - φ) / Δφ;                 // calculate latitude index in direction +90 to -90
+            // console.log("i: " + i);
+            // console.log("j: " + j);
 
             //         1      2           After converting λ and φ to fractional grid indexes i and j, we find the
             //        fi  i   ci          four points "G" that enclose point (i, j). These points are at the four
@@ -645,21 +713,29 @@ var products = function() {
 
             var fi = Math.floor(i), ci = fi + 1;
             var fj = Math.floor(j), cj = fj + 1;
+            // console.log("fi: " + fi);
+            // console.log("ci: " + ci);
+            // console.log("fj: " + fj);
+            // console.log("cj: " + cj);
 
             var row;
             if ((row = grid[fj])) {
                 var g00 = row[fi];
                 var g10 = row[ci];
+                // console.log("g00: " + g00);
+                // console.log("g10: " + g10);
                 if (µ.isValue(g00) && µ.isValue(g10) && (row = grid[cj])) {
                     var g01 = row[fi];
                     var g11 = row[ci];
+                    // console.log("g01: " + g01);
+                    // console.log("g11: " + g11);
                     if (µ.isValue(g01) && µ.isValue(g11)) {
                         // All four points found, so interpolate the value.
                         return builder.interpolate(i - fi, j - fj, g00, g10, g01, g11);
                     }
                 }
             }
-            // console.log("cannot interpolate: " + λ + "," + φ + ": " + fi + " " + ci + " " + fj + " " + cj);
+            console.log("cannot interpolate: " + λ + "," + φ + ": " + fi + " " + ci + " " + fj + " " + cj);
             return null;
         }
 
@@ -685,6 +761,7 @@ var products = function() {
                 results.push(factory.create(attr));
             }
         });
+        console.log(attr);
         return results.filter(µ.isValue);
     }
 
