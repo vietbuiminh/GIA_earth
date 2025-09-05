@@ -36,11 +36,12 @@ var products = function() {
     }
 
     function giaPath(attr) {
-        return [GIA_PATH, "gia-500ya.json"].join("/");
+        // console.log(attr);
+        return [GIA_PATH, "gia-1000ya.json"].join("/");
     }
     function giaYear(attr) {
         var now = new Date();
-        return new Date(now.setFullYear(now.getFullYear() - 500));
+        return new Date(Date.UTC(1000, 0, 1, 0, 0, 0, 0));
     }
 
     /**
@@ -124,8 +125,8 @@ var products = function() {
                     field: "scalar",
                     type: "gia",
                     description: localize({
-                        name: {en: "Relative Sea Level Change 500Kya", ja: "相対海面変化 500Kya"},
-                        qualifier: {en: " @ Surface", ja: " @ 地上"}
+                        name: {en: "Relative Sea Level Change", ja: "相対海面変化"},
+                        qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr)}
                     }),
                     paths: [giaPath(attr)],
                     date: giaYear(attr),
@@ -145,14 +146,12 @@ var products = function() {
                         {label: "mm", conversion: function(x) { return x * 1000; },     precision: 0}
                     ],
                     scale: {
-                        bounds: [-3, 8],
-                        gradient: µ.segmentedColorScale([
-                            [-3, [0, 0, 4]],
-                            [0, [72, 11, 119]],
-                            [2, [182, 54, 121]],
-                            [4, [251, 140, 60]],
-                            [8, [252, 253, 191]]
-                        ])
+                        bounds: [-10, 10],
+                        gradient: function(v, a) {
+                            // Normalize v to [0, 1] for color mapping
+                            var t = Math.min(Math.max((v + 10) / 20, 0), 1);
+                            return µ.sinebowColor(t, a);
+                        }
                     },
                     particles: {velocityScale: 1/60000, maxIntensity:  1}
                 });
@@ -666,20 +665,20 @@ var products = function() {
         if (!header.forecastTime) {
             header.forecastTime = 0;
         }
-        console.log("buildGrid");
-        console.log(builder.header);
+        // console.log("buildGrid");
+        // console.log(builder.header);
         var header = builder.header;
         var λ0 = header.lo1, φ0 = header.la1;  // the grid's origin (e.g., 0.0E, 90.0N)
         var Δλ = header.dx, Δφ = header.dy;    // distance between grid points (e.g., 2.5 deg lon, 2.5 deg lat)
         var ni = header.nx, nj = header.ny;    // number of grid points W-E and N-S (e.g., 144 x 73)
         var date = new Date(header.refTime);
         date.setHours(date.getHours() + header.forecastTime);
-        console.log("λ0: " + λ0);
-        console.log("φ0: " + φ0);
-        console.log("Δλ: " + Δλ);
-        console.log("Δφ: " + Δφ);
-        console.log("ni: " + ni);
-        console.log("nj: " + nj);
+        // console.log("λ0: " + λ0);
+        // console.log("φ0: " + φ0);
+        // console.log("Δλ: " + Δλ);
+        // console.log("Δφ: " + Δφ);
+        // console.log("ni: " + ni);
+        // console.log("nj: " + nj);
         // Scan mode 0 assumed. Longitude increases from λ0, and latitude decreases from φ0.
         // http://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_table3-4.shtml
         var grid = [], p = 0;
@@ -735,7 +734,7 @@ var products = function() {
                     }
                 }
             }
-            console.log("cannot interpolate: " + λ + "," + φ + ": " + fi + " " + ci + " " + fj + " " + cj);
+            // console.log("cannot interpolate: " + λ + "," + φ + ": " + fi + " " + ci + " " + fj + " " + cj);
             return null;
         }
 
@@ -761,7 +760,7 @@ var products = function() {
                 results.push(factory.create(attr));
             }
         });
-        console.log(attr);
+        // console.log(attr);
         return results.filter(µ.isValue);
     }
 

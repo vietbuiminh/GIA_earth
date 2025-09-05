@@ -876,10 +876,22 @@
      * Display the grid's validity date in the menu. Allow toggling between local and UTC time.
      */
     function showDate(grids) {
-        var date = new Date(validityDate(grids)), isLocal = d3.select("#data-date").classed("local");
-        var formatted = isLocal ? µ.toLocalISO(date) : µ.toUTCISO(date);
-        d3.select("#data-date").text(formatted + " " + (isLocal ? "Local" : "UTC"));
-        d3.select("#toggle-zone").text("⇄ " + (isLocal ? "UTC" : "Local"));
+        if (!grids || !grids.primaryGrid) {
+            d3.select("#data-date").text("").classed("local", false);
+            d3.select("#toggle-zone").text("");
+            return;
+        }
+        if (grids.primaryGrid.type === "gia") {
+            var date = new Date(validityDate(grids)), isLocal = d3.select("#data-date").classed("local");
+            var formatted = isLocal ? µ.toLocalISO(date) : µ.toUTCISO(date); // just to make it not spit out error
+            d3.select("#data-date").text(grids.primaryGrid.date.getFullYear() + " years ago").classed("local", false);
+        }
+        else {
+            var date = new Date(validityDate(grids)), isLocal = d3.select("#data-date").classed("local");
+            var formatted = isLocal ? µ.toLocalISO(date) : µ.toUTCISO(date);
+            d3.select("#data-date").text(formatted + " " + (isLocal ? "Local" : "UTC"));
+            d3.select("#toggle-zone").text("⇄ " + (isLocal ? "UTC" : "Local"));
+        }
     }
 
     /**
@@ -1202,6 +1214,15 @@
             }
         });
 
+        d3.select("#gia-mode-enable").on("click", function() {
+            if (configuration.get("param") !== "gia") {
+                configuration.save({param: "gia", surface: "surface", level: "level", overlayType: "default"});
+            }
+        });
+        configuration.on("change:param", function(x, param) {
+            d3.select("#gia-mode-enable").classed("highlighted", param === "gia");
+        });
+        
         // Add handlers for mode buttons.
         d3.select("#wind-mode-enable").on("click", function() {
             if (configuration.get("param") !== "wind") {
@@ -1234,18 +1255,6 @@
         });
         configuration.on("change:param", function(x, param) {
             d3.select("#ocean-mode-enable").classed("highlighted", param === "ocean");
-        });
-
-        d3.select("#gia-mode-enable").on("click", function() {
-            if (configuration.get("param") !== "gia") {
-                var gia = {param: "gia", surface: "surface", level: "currents", overlayType: "default"};
-                var attr = _.clone(configuration.attributes);
-                configuration.save(gia);
-                stopCurrentAnimation(true);
-            }
-        });
-        configuration.on("change:param", function(x, param) {
-            d3.select("#gia-mode-enable").classed("highlighted", param === "gia");
         });
 
         // Add logic to disable buttons that are incompatible with each other.
@@ -1304,6 +1313,16 @@
 
     function start() {
         // Everything is now set up, so load configuration from the hash fragment and kick off change events.
+        // if (!window.location.hash) {
+        //     configuration.save({
+        //         param: "gia",
+        //         surface: "surface",
+        //         level: "level",
+        //         overlayType: "default",
+        //         date: "current",
+        //         hour: ""
+        //     });
+        // }
         configuration.fetch();
     }
 
