@@ -8,6 +8,8 @@ console.log("============================================================");
 console.log(new Date().toISOString() + " - Starting");
 
 var util = require("util");
+var fs = require("fs");
+var path = require("path");
 
 /**
  * Returns true if the response should be compressed.
@@ -45,6 +47,29 @@ function logger() {
         '" :user-agent" :referrer :req[cf-ray] :req[accept-encoding]\n:request-all\n\n:response-all\n'
     );
 }
+
+// auto-generate GIA catalog from available files
+function generateGIACatalog() {
+    const giaDir = path.join(__dirname, 'public', 'data', 'gia');
+    const catalogPath = path.join(giaDir, 'catalog.json');
+    
+    try {
+        const files = fs.readdirSync(giaDir)
+            .filter(file => /^gia-\d+ya\.json$/.test(file))
+            .sort((a, b) => {
+                const getYear = filename => parseInt(filename.match(/gia-(\d+)ya/)[1]);
+                return getYear(a) - getYear(b);
+            });
+        
+        fs.writeFileSync(catalogPath, JSON.stringify(files, null, 2));
+        console.log(`Generated GIA catalog with ${files.length} datasets: ${files.join(', ')}`);
+    } catch (error) {
+        console.error('Error generating GIA catalog:', error.message);
+    }
+}
+
+// TODO: kind of a hack - ideally this would be part of a build step???
+generateGIACatalog();
 
 var port = process.argv[2];
 var express = require("express");
