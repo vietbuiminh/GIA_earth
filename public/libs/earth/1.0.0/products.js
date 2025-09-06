@@ -226,18 +226,22 @@ var products = function() {
                         {label: "mm", conversion: function(x) { return x * 1000; },     precision: 0}
                     ],
                     scale: {
-                        bounds: [-10, 10],
+                        bounds: [-500, 500],
                         // gradient: function(v, a) {
                             // Normalize v to [0, 1] for color mapping
                             // var t = Math.min(Math.max((v + 10) / 20, 0), 1);
                             // return µ.sinebowColor(t, a);
                         // }
                         gradient: µ.segmentedColorScale([
-                            [-10, [0, 0, 64]],   // Dark deep blue
-                            [-5, [0, 0, 255]],   // Deep blue
-                            [0, [255, 255, 255]], // White, fully transparent
-                            [5, [255, 0, 0]],    // Light red
-                            [10, [139, 0, 0]]     // Dark red
+                            [-500, [0, 0, 32]],    // Even darker blue for -200
+                            [-400, [0, 0, 64]],   // Dark deep blue
+                            [-100, [0, 0, 255]],   // Deep blue
+                            [-1, [255, 255, 255]], // White, fully transparent
+                            // [0, [0, 0, 0]],
+                            [1, [255, 255, 255]], // White, fully transparent
+                            [100, [255, 0, 0]],    // Light red
+                            [400, [139, 0, 0]],     // Dark red
+                            [500, [64, 0, 0]]     // Even darker red for 200
                         ])
                     },
                     particles: {velocityScale: 1/60000, maxIntensity:  1}
