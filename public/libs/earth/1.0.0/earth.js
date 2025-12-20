@@ -271,9 +271,21 @@
             log.debug("Download in progress--ignoring nav request.");
             return;
         }
-        var next = gridAgent.value().primaryGrid.navigate(step);
-        if (next) {
-            configuration.save(µ.dateToConfig(next));
+        var currentParam = configuration.get("param");
+        var grids = gridAgent.value();
+        
+        if (currentParam === "gia" && grids && grids.primaryGrid) {
+            // GIA navigation returns years ago as string
+            var next = grids.primaryGrid.navigate(step);
+            if (next) {
+                configuration.save({date: next});
+            }
+        } else if (grids && grids.primaryGrid) {
+            // For other data types, use existing navigation
+            var next = grids.primaryGrid.navigate(step);
+            if (next) {
+                configuration.save(µ.dateToConfig(next));
+            }
         }
     }
 
@@ -882,9 +894,15 @@
             return;
         }
         if (grids.primaryGrid.type === "gia") {
-            var date = new Date(validityDate(grids)), isLocal = d3.select("#data-date").classed("local");
-            var formatted = isLocal ? µ.toLocalISO(date) : µ.toUTCISO(date); // just to make it not spit out error
-            d3.select("#data-date").text(grids.primaryGrid.date.getFullYear() + " years ago").classed("local", false);
+            // Get the year from configuration and handle "current" properly
+            var configDate = configuration.get("date");
+            var yearText;
+            if (configDate === "current") {
+                yearText = "0 years ago";
+            } else {
+                yearText = configDate + " years ago";
+            }
+            d3.select("#data-date").text(yearText).classed("local", false);
         }
         else {
             var date = new Date(validityDate(grids)), isLocal = d3.select("#data-date").classed("local");
@@ -1206,10 +1224,10 @@
                     d3.select("#nav-forward-more").attr("title", "+1 Month");
                     break;
                 case "gia":
-                    d3.select("#nav-backward-more").attr("title", "-10Kya");
-                    d3.select("#nav-backward").attr("title", "-1Kya");
-                    d3.select("#nav-forward").attr("title", "+1Kya");
-                    d3.select("#nav-forward-more").attr("title", "+10Kya");
+                    d3.select("#nav-backward-more").attr("title", "Jump back 1000 years");
+                    d3.select("#nav-backward").attr("title", "Previous time period (250 years)");
+                    d3.select("#nav-forward").attr("title", "Next time period (250 years)");
+                    d3.select("#nav-forward-more").attr("title", "Jump forward 1000 years");
                     break;
             }
         });

@@ -15,7 +15,9 @@ var products = function() {
     var catalogs = {
         // The OSCAR catalog is an array of file names, sorted and prefixed with yyyyMMdd. Last item is the
         // most recent. For example: [ 20140101-abc.json, 20140106-abc.json, 20140112-abc.json, ... ]
-        oscar: µ.loadJson([OSCAR_PATH, "catalog.json"].join("/"))
+        oscar: µ.loadJson([OSCAR_PATH, "catalog.json"].join("/")),
+        // an array of file names, sorted by year [ gia-0ya.json, gia-250ya.json, ... ]
+        gia: µ.loadJson([GIA_PATH, "catalog.json"].join("/"))
     };
 
     function buildProduct(overrides) {
@@ -36,12 +38,86 @@ var products = function() {
     }
 
     function giaPath(attr) {
-        // console.log(attr);
-        return [GIA_PATH, "gia-1000ya.json"].join("/");
+        return when(catalogs.gia).then(function(catalog) {
+            var file = lookupGia(catalog, attr.date);
+            return file ? [GIA_PATH, file].join("/") : [GIA_PATH, "gia-0ya.json"].join("/"); // TODO: we could do a different year for default
+        });
     }
+
     function giaYear(attr) {
-        var now = new Date();
-        return new Date(Date.UTC(1000, 0, 1, 0, 0, 0, 0));
+        return when(catalogs.gia).then(function(catalog) {
+            var file = lookupGia(catalog, attr.date);
+            if (file) {
+                var yearMatch = file.match(/gia-(\d+)ya\.json/);
+                var yearsAgo = yearMatch ? parseInt(yearMatch[1]) : 1000;
+
+                return new Date(Date.UTC(yearsAgo, 0, 1, 0, 0, 0, 0));
+            }
+            return new Date(Date.UTC(1000, 0, 1, 0, 0, 0, 0));
+        });
+    }
+
+    /**
+     * Returns the GIA file name for the specified date and offset.
+     * @param {Array} catalog array of GIA file names, sorted by year
+     * @param {String} date string with format yyyy/MM/dd or "current" or specific year
+     * @param {Number?} offset step offset for navigation
+     * @returns {String} file name
+     */
+    function lookupGia(catalog, date, offset) {
+        offset = +offset || 0;
+        
+        if (date === "current") {
+            //  "current" =  (0 years ago)...not super sure about this one
+            var currentIndex = catalog.length - 1;
+            return catalog[Math.max(0, Math.min(catalog.length - 1, currentIndex + offset))];
+        }
+
+        
+        if (typeof date === "string" && date.match(/^\d+$/)) {
+            var targetYear = parseInt(date);
+            var closest = catalog.reduce(function(prev, curr) {
+                var prevMatch = prev.match(/gia-(\d+)ya\.json/);
+                var currMatch = curr.match(/gia-(\d+)ya\.json/);
+                if (!prevMatch || !currMatch) return prev; // Guard against null matches
+                var prevYear = parseInt(prevMatch[1]);
+                var currYear = parseInt(currMatch[1]);
+                return Math.abs(currYear - targetYear) < Math.abs(prevYear - targetYear) ? curr : prev;
+            });
+            var index = catalog.indexOf(closest);
+            return catalog[Math.max(0, Math.min(catalog.length - 1, index + offset))];
+        }
+        
+        // default fallback: middle of catalog
+        var defaultIndex = Math.floor(catalog.length / 2);
+        return catalog[Math.max(0, Math.min(catalog.length - 1, defaultIndex + offset))];
+    }
+
+    /**
+     * Returns years ago string for the chronologically next or previous GIA data layer.
+     * Steps of ±1 move to the next/previous dataset (250 years), steps of ±10 move 4 datasets (1000 years).
+     */
+    function giaStep(catalog, date, step) {
+        var currentFile = lookupGia(catalog, date);
+        var currentIndex = catalog.indexOf(currentFile);
+        
+        // ±1 = 1 dataset (250 years), ±10 = 4 datasets (1000 years)
+        var stepIncrement;
+        if (Math.abs(step) === 1) {
+            stepIncrement = step; // ±1 dataset
+        } else if (Math.abs(step) === 10) {
+            stepIncrement = step > 0 ? 4 : -4; // ±4 datasets
+        } else {
+            stepIncrement = step; // fallback
+        }
+        
+        var newIndex = Math.max(0, Math.min(catalog.length - 1, currentIndex + stepIncrement));
+        var newFile = catalog[newIndex];
+        var yearMatch = newFile.match(/gia-(\d+)ya\.json/);
+        var years = yearMatch ? parseInt(yearMatch[1]) : 1000;
+        
+        // year ago as string similar to the rest of the app
+        return years.toString();
     }
 
     /**
@@ -121,7 +197,8 @@ var products = function() {
         "gia": {
             matches: _.matches({param: "gia"}),
             create: function(attr) {
-                return buildProduct({
+                return when(catalogs.gia).then(function(catalog) {
+                    return buildProduct({
                     field: "scalar",
                     type: "gia",
                     description: localize({
@@ -130,6 +207,9 @@ var products = function() {
                     }),
                     paths: [giaPath(attr)],
                     date: giaYear(attr),
+                    navigate: function(step) {
+                        return giaStep(catalog, attr.date, step);
+                    },
                     builder: function(file) {
                         var data = file[0].data;
                         return {
@@ -146,21 +226,26 @@ var products = function() {
                         {label: "mm", conversion: function(x) { return x * 1000; },     precision: 0}
                     ],
                     scale: {
-                        bounds: [-10, 10],
+                        bounds: [-500, 500],
                         // gradient: function(v, a) {
                             // Normalize v to [0, 1] for color mapping
                             // var t = Math.min(Math.max((v + 10) / 20, 0), 1);
                             // return µ.sinebowColor(t, a);
                         // }
                         gradient: µ.segmentedColorScale([
-                            [-10, [0, 0, 64]],   // Dark deep blue
-                            [-5, [0, 0, 255]],   // Deep blue
-                            [0, [255, 255, 255]], // White, fully transparent
-                            [5, [255, 0, 0]],    // Light red
-                            [10, [139, 0, 0]]     // Dark red
+                            [-500, [0, 0, 32]],    // Even darker blue for -200
+                            [-400, [0, 0, 64]],   // Dark deep blue
+                            [-100, [0, 0, 255]],   // Deep blue
+                            [-1, [255, 255, 255]], // White, fully transparent
+                            // [0, [0, 0, 0]],
+                            [1, [255, 255, 255]], // White, fully transparent
+                            [100, [255, 0, 0]],    // Light red
+                            [400, [139, 0, 0]],     // Dark red
+                            [500, [64, 0, 0]]     // Even darker red for 200
                         ])
                     },
                     particles: {velocityScale: 1/60000, maxIntensity:  1}
+                    });
                 });
             }
         },
