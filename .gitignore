@@ -5,3 +5,9 @@ target
 scratch
 private
 *.iml
+
+public/data/geb*
+contours*
+etopo*
+zero*
+package-lock.json

@@ -334,7 +334,7 @@ var globes = function() {
                 mapSvg.append("path")
                     .attr("class", "lakes");
                 foregroundSvg.append("use")
-                    .attr("xlink:href", "#sphere")
+                    // .attr("xlink:href", "#sphere")
                     .attr("class", "foreground-sphere");
                 // Initialize relief canvas for this globe
                 if (view) this.initReliefCanvas(view);

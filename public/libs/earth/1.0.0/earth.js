@@ -303,6 +303,7 @@
         rendererAgent._previous = dispatch;
 
         // First clear map and foreground svg contents.
+        // µ.removeChildren(d3.select("#background").node());
         µ.removeChildren(d3.select("#map").node());
         µ.removeChildren(d3.select("#foreground").node());
 
@@ -649,7 +650,7 @@
                     if (coord) {
                         var λ = coord[0], φ = coord[1];
                         if (isFinite(λ)) {
-                            if (primaryGrid.type !== "gia") {
+                            if (primaryGrid.type !== "gia" && primaryGrid.type !== "topo") {
                                 wind = interpolate(λ, φ);
                                 
                                 if (wind) {
@@ -1002,13 +1003,17 @@
         }
 
         if (field.isDefined(point[0], point[1]) && grids) {
-            if (grids.primaryGrid.type !== "gia") {
+            if (grids.primaryGrid.type !== "gia" && grids.primaryGrid.type !== "topo") {
                 var wind = grids.primaryGrid.interpolate(λ, φ);
                 if (µ.isValue(wind)) {
                     showWindAtLocation(wind, grids.primaryGrid);
                 }
             }
-            if (grids.overlayGrid !== grids.primaryGrid || grids.primaryGrid.type === "gia") {
+            if (
+                grids.overlayGrid !== grids.primaryGrid ||
+                grids.primaryGrid.type === "gia" ||
+                grids.primaryGrid.type === "topo"
+            ) {
                 var value = grids.overlayGrid.interpolate(λ, φ);
                 if (µ.isValue(value)) {
                     showOverlayValueAtLocation(value, grids.overlayGrid);
@@ -1208,6 +1213,7 @@
         // Modify menu depending on what mode we're in.
         configuration.on("change:param", function(context, mode) {
             d3.selectAll(".gia-mode").classed("invisible", mode !== "gia");
+            d3.selectAll(".topo-mode").classed("invisible", mode !== "topo");
             d3.selectAll(".ocean-mode").classed("invisible", mode !== "ocean");
             d3.selectAll(".wind-mode").classed("invisible", mode !== "wind");
             switch (mode) {
@@ -1229,6 +1235,12 @@
                     d3.select("#nav-forward").attr("title", "Next time period (250 years)");
                     d3.select("#nav-forward-more").attr("title", "Jump forward 1000 years");
                     break;
+                case "topo":
+                    d3.select("#nav-backward-more").attr("title", "Jump back 1000 years");
+                    d3.select("#nav-backward").attr("title", "Previous time period (250 years)");
+                    d3.select("#nav-forward").attr("title", "Next time period (250 years)");
+                    d3.select("#nav-forward-more").attr("title", "Jump forward 1000 years");
+                    break;
             }
         });
 
@@ -1240,7 +1252,14 @@
         configuration.on("change:param", function(x, param) {
             d3.select("#gia-mode-enable").classed("highlighted", param === "gia");
         });
-        
+        d3.select("#topo-mode-enable").on("click", function() {
+            if (configuration.get("param") !== "topo") {
+                configuration.save({param: "topo", surface: "surface", level: "level", overlayType: "default"});
+            }
+        });
+        configuration.on("change:param", function(x, param) {
+            d3.select("#topo-mode-enable").classed("highlighted", param === "topo");
+        });
         // Add handlers for mode buttons.
         d3.select("#wind-mode-enable").on("click", function() {
             if (configuration.get("param") !== "wind") {
@@ -1313,7 +1332,9 @@
         });
         bindButtonToConfiguration("#overlay-wind", {param: "wind", overlayType: "default"});
         bindButtonToConfiguration("#overlay-gia", {param: "gia", overlayType: "default"});
+        bindButtonToConfiguration("#overlay-topo", {param: "topo", overlayType: "default"});
         bindButtonToConfiguration("#overlay-gia-off", {overlayType: "off"});
+        bindButtonToConfiguration("#overlay-topo-off", {overlayType: "off"});
         bindButtonToConfiguration("#overlay-ocean-off", {overlayType: "off"});
         bindButtonToConfiguration("#overlay-currents", {overlayType: "default"});
 

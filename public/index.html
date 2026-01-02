@@ -26,9 +26,11 @@
     <!--[if lte IE 8]><p id="warn">This site requires IE9 or newer.</p><![endif]-->
 
     <div id="display">
+        <!-- <canvas id="background" class="fill-screen"></canvas> -->
         <svg id="map" class="fill-screen" xmlns="http://www.w3.org/2000/svg" version="1.1"></svg>
         <canvas id="animation" class="fill-screen"></canvas>
         <canvas id="overlay" class="fill-screen"></canvas>
+        <!-- <canvas id="topo" class="fill-screen"></canvas> -->
         <svg id="foreground" class="fill-screen" xmlns="http://www.w3.org/2000/svg" version="1.1"></svg>
     </div>
 
@@ -73,7 +75,8 @@
                     title="Toggle Grid">Grid</span>
             </p>
             <p>Mode | <span class="text-button" id="relief-mode-enable">Relief</span> – <span class="text-button"
-                    id="gia-mode-enable">GIA</span>
+                    id="gia-mode-enable">GIA</span> – <span class="text-button"
+                    id="topo-mode-enable">Topo</span>
                 <!-- – <span
                 class="text-button" id="wind-mode-enable">wind</span> – <span
                 class="text-button" id="ocean-mode-enable">ocean</span> -->
@@ -105,13 +108,16 @@
             <p class="gia-mode invisible">Overlay | <span class="text-button" id="overlay-gia-off">None</span> – <span
                     class="text-button" id="overlay-gia" title="GIA">GIA</span>
             </p>
+            <p class="topo-mode invisible">Overlay | <span class="text-button" id="overlay-topo-off">None</span> – <span
+                    class="text-button" id="overlay-topo" title="Topography">Topo</span>
+            </p>
             <!-- <p class="gia-mode invisible"><span style="visibility:hidden">Overlay</span> |</p> -->
 
             <p class="ocean-mode invisible">Overlay | <span
                 class="text-button" id="overlay-ocean-off">None</span> – <span
                 class="text-button" id="overlay-currents" title="Currents">Currents</span>
             </p>
-            <!-- <p class="ocean-mode invisible"><span style="visibility:hidden">Overlay</span> |</p>
+            <!-- <p class="ocean-mode invisible"><span style="visibility:hidden">Overlay</span> |</p> -->
             <p>Projection | <span
                 class="proj text-button" id="atlantis" title="Atlantis">A</span> – <span
                 class="proj text-button" id="azimuthal_equidistant" title="Azimuthal Equidistant">AE</span> – <span
@@ -121,7 +127,7 @@
                 class="proj text-button" id="stereographic" title="Stereographic">S</span> – <span
                 class="proj text-button" id="waterman" title="Waterman Butterfly">WB</span> – <span
                 class="proj text-button" id="winkel3" title="Winkel Tripel">W3</span>
-            </p> -->
+            </p>
             <!--<p>免責事項 | 正確な情報を提供するためのものではありません</p>-->
             <p id="lang"><a href="/jp" class="internal-link">日本語</a></p>
             <p>
@@ -132,10 +138,10 @@
         </div>
     </div>
 
-    <script src="//cdnjs.cloudflare.com/ajax/libs/underscore.js/1.6.0/underscore-min.js" charset="utf-8"></script>
+    <!-- <script src="//cdnjs.cloudflare.com/ajax/libs/underscore.js/1.6.0/underscore-min.js" charset="utf-8"></script>
     <script src="//cdnjs.cloudflare.com/ajax/libs/backbone.js/1.1.0/backbone-min.js" charset="utf-8"></script>
     <script src="//cdnjs.cloudflare.com/ajax/libs/topojson/1.1.0/topojson.min.js" charset="utf-8"></script>
-    <script src="//cdnjs.cloudflare.com/ajax/libs/d3/3.3.10/d3.min.js" charset="utf-8"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/d3/3.3.10/d3.min.js" charset="utf-8"></script> -->
 
 
     <script src="/libs/underscore.js/1.6.0/underscore.js" charset="utf-8"></script>

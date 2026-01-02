@@ -9,6 +9,7 @@
 var products = function() {
     "use strict";
 
+    var TOPO_PATH = "/data/topo";
     var GIA_PATH = "/data/gia";
     var WEATHER_PATH = "/data/weather";
     var OSCAR_PATH = "/data/oscar";
@@ -55,6 +56,13 @@ var products = function() {
             }
             return new Date(Date.UTC(1000, 0, 1, 0, 0, 0, 0));
         });
+    }
+
+    function topoPath(attr) {
+        return [TOPO_PATH, "low-filtered-coast.json"].join("/");
+    }
+    function topoYear(attr) {
+        return new Date(Date.UTC(2025, 0, 1, 0, 0, 0, 0));
     }
 
     /**
@@ -246,6 +254,50 @@ var products = function() {
                     },
                     particles: {velocityScale: 1/60000, maxIntensity:  1}
                     });
+                });
+            }
+        },
+
+        "topo": {
+            matches: _.matches({param: "topo"}),
+            create: function(attr) {
+                return buildProduct({
+                    field: "scalar",
+                    type: "topo",
+                    description: localize({
+                        name: {en: "Topography", ja: "地形"},
+                        qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr)}
+                    }),
+                    paths: [topoPath(attr)],
+                    date: topoYear(attr),
+                    builder: function(file) {
+                        var data = file[0].data;
+                        return {
+                            header: file[0].header,
+                            interpolate: bilinearInterpolateScalar,
+                            data: function(i) {
+                                var s = data[i];
+                                return µ.isValue(s) ? s : null;
+                            }
+                        }
+                    },
+                    units: [
+                        {label: "m",  conversion: function(x) { return x; },            precision: 1},
+                        {label: "cm", conversion: function(x) { return x * 100; },      precision: 0},
+                        {label: "mm", conversion: function(x) { return x * 1000; },     precision: 0}
+                    ],
+                    scale: {
+                        bounds: [-500, 10],
+                        gradient: µ.segmentedColorScale([
+                            [-500, [0, 0, 32]],    // Even darker blue for -200
+                            [-400, [0, 0, 64]],   // Dark deep blue
+                            [-100, [0, 0, 255]],   // Deep blue
+                            [-3, [255, 255, 255]], // White, fully transparent
+                            [0, [0, 64, 0]],        // Dark green, fully transparent
+                            [10, [0, 0, 0]]       // Light green
+                        ])
+                    },
+                    particles: {velocityScale: 1/60000, maxIntensity:  1}
                 });
             }
         },
@@ -748,15 +800,15 @@ var products = function() {
      */
     function buildGrid(builder) {
         // var builder = createBuilder(data);
-        var header = builder.header;
-        if (!header.refTime) {
-            var now = new Date();
-            now.setFullYear(header.timeValue * 1000);
-            header.refTime = now.toISOString();
-        }
-        if (!header.forecastTime) {
-            header.forecastTime = 0;
-        }
+        // var header = builder.header;
+        // if (!header.refTime && header.timeValue) {
+        //     var now = new Date();
+        //     now.setFullYear(header.timeValue * 1000);
+        //     header.refTime = now.toISOString();
+        // }
+        // if (!header.forecastTime) {
+        //     header.forecastTime = 0;
+        // }
         // console.log("buildGrid");
         // console.log(builder.header);
         var header = builder.header;
@@ -765,12 +817,12 @@ var products = function() {
         var ni = header.nx, nj = header.ny;    // number of grid points W-E and N-S (e.g., 144 x 73)
         var date = new Date(header.refTime);
         date.setHours(date.getHours() + header.forecastTime);
-        // console.log("λ0: " + λ0);
-        // console.log("φ0: " + φ0);
-        // console.log("Δλ: " + Δλ);
-        // console.log("Δφ: " + Δφ);
-        // console.log("ni: " + ni);
-        // console.log("nj: " + nj);
+        console.log("λ0: " + λ0);
+        console.log("φ0: " + φ0);
+        console.log("Δλ: " + Δλ);
+        console.log("Δφ: " + Δφ);
+        console.log("ni: " + ni);
+        console.log("nj: " + nj);
         // Scan mode 0 assumed. Longitude increases from λ0, and latitude decreases from φ0.
         // http://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_table3-4.shtml
         var grid = [], p = 0;
