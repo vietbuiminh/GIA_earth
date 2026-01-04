@@ -588,7 +588,7 @@ var µ = function() {
                         return;
                     }
                     model.set(parse(
-                        window.location.hash.substr(1) || DEFAULT_CONFIG,
+                        window.location.hash.substring(1) || DEFAULT_CONFIG,
                         model._projectionNames,
                         model._overlayTypes));
                     break;

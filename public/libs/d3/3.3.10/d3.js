@@ -1016,7 +1016,13 @@ d3 = function() {
     function onAdd() {
       var l = wrap(listener, d3_array(arguments));
       onRemove.call(this);
-      this.addEventListener(type, this[name] = l, l.$ = capture);
+      // Patch: Use { passive: false } for touch and wheel events so preventDefault works
+      var usePassive = false;
+      if (type === "touchstart" || type === "touchmove" || type === "touchend" || type === "touchcancel" || type === "wheel") {
+        this.addEventListener(type, this[name] = l, { capture: capture, passive: false });
+      } else {
+        this.addEventListener(type, this[name] = l, l.$ = capture);
+      }
       l._ = listener;
     }
     function removeAll() {
